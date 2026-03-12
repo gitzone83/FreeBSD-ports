@@ -6,6 +6,8 @@ on:
     paths:
       - 'net-mgmt/pfSense-pkg-switchmgmt/**'
       - '.github/workflows/build-switchmgmt.yml'
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:

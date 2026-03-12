@@ -1,0 +1,9 @@
+pkg/switchmgmt.inc
+pkg/switchmgmt.xml
+pkg/switchmgmt_settings.xml
+pkg/switchmgmt_poll.php
+www/status_switchmgmt.php
+/etc/inc/priv/switchmgmt.priv.inc
+%%DATADIR%%/info.xml
+@dir /etc/inc/priv
+@dir /etc/inc

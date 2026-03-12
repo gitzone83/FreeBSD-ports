@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<packagegui>
+	<title>Services/Switch Management</title>
+	<name>switchmgmt</name>
+	<version>0.1.0</version>
+	<include_file>/usr/local/pkg/switchmgmt.inc</include_file>
+	<addedit_string>Switch Management: saved settings</addedit_string>
+	<delete_string>Switch Management: removed entry</delete_string>
+	<menu>
+		<name>Switch Management</name>
+		<tooltiptext>Manage and monitor network switches via SNMP.</tooltiptext>
+		<section>Services</section>
+		<url>/pkg.php?xml=switchmgmt.xml</url>
+	</menu>
+	<tabs>
+		<tab>
+			<text>Switches</text>
+			<url>/pkg.php?xml=switchmgmt.xml</url>
+			<active/>
+		</tab>
+		<tab>
+			<text>Settings</text>
+			<url>/pkg_edit.php?xml=switchmgmt_settings.xml&amp;id=0</url>
+		</tab>
+		<tab>
+			<text>Status</text>
+			<url>/status_switchmgmt.php</url>
+		</tab>
+	</tabs>
+	<adddeleteeditpagefields>
+		<columnitem>
+			<fielddescr>Description</fielddescr>
+			<fieldname>description</fieldname>
+		</columnitem>
+		<columnitem>
+			<fielddescr>IP Address</fielddescr>
+			<fieldname>ipaddr</fieldname>
+		</columnitem>
+		<columnitem>
+			<fielddescr>SNMP Version</fielddescr>
+			<fieldname>snmpversion</fieldname>
+		</columnitem>
+		<columnitem>
+			<fielddescr>Community / User</fielddescr>
+			<fieldname>community</fieldname>
+		</columnitem>
+	</adddeleteeditpagefields>
+	<fields>
+		<field>
+			<name>Switch Identity</name>
+			<type>listtopic</type>
+		</field>
+		<field>
+			<fielddescr>Description</fielddescr>
+			<fieldname>description</fieldname>
+			<type>input</type>
+			<size>40</size>
+			<description>A friendly name for this switch (e.g. "Core Switch 1").</description>
+			<required/>
+		</field>
+		<field>
+			<fielddescr>IP Address</fielddescr>
+			<fieldname>ipaddr</fieldname>
+			<type>input</type>
+			<size>20</size>
+			<description>IP address or hostname of the switch.</description>
+			<required/>
+		</field>
+		<field>
+			<name>SNMP Credentials</name>
+			<type>listtopic</type>
+		</field>
+		<field>
+			<fielddescr>SNMP Version</fielddescr>
+			<fieldname>snmpversion</fieldname>
+			<type>select</type>
+			<default_value>2c</default_value>
+			<options>
+				<option><name>v1</name><value>1</value></option>
+				<option><name>v2c</name><value>2c</value></option>
+				<option><name>v3</name><value>3</value></option>
+			</options>
+			<description>SNMP protocol version to use.</description>
+		</field>
+		<field>
+			<fielddescr>Community String</fielddescr>
+			<fieldname>community</fieldname>
+			<type>input</type>
+			<size>30</size>
+			<default_value>public</default_value>
+			<description>SNMP community string (v1/v2c) or security name (v3).</description>
+			<required/>
+		</field>
+		<field>
+			<name>SNMPv3 Settings</name>
+			<type>listtopic</type>
+		</field>
+		<field>
+			<name>SNMPv3 Help</name>
+			<type>info</type>
+			<description>
+				<![CDATA[
+				The following fields are only used when SNMP Version is set to v3.
+				]]>
+			</description>
+		</field>
+		<field>
+			<fielddescr>Security Level</fielddescr>
+			<fieldname>v3seclevel</fieldname>
+			<type>select</type>
+			<default_value>authPriv</default_value>
+			<options>
+				<option><name>noAuthNoPriv</name><value>noAuthNoPriv</value></option>
+				<option><name>authNoPriv</name><value>authNoPriv</value></option>
+				<option><name>authPriv</name><value>authPriv</value></option>
+			</options>
+			<description>SNMPv3 security level.</description>
+		</field>
+		<field>
+			<fielddescr>Auth Protocol</fielddescr>
+			<fieldname>v3authproto</fieldname>
+			<type>select</type>
+			<default_value>SHA</default_value>
+			<options>
+				<option><name>MD5</name><value>MD5</value></option>
+				<option><name>SHA</name><value>SHA</value></option>
+			</options>
+			<description>Authentication protocol.</description>
+		</field>
+		<field>
+			<fielddescr>Auth Password</fielddescr>
+			<fieldname>v3authpass</fieldname>
+			<type>password</type>
+			<size>30</size>
+			<description>Authentication password (minimum 8 characters).</description>
+		</field>
+		<field>
+			<fielddescr>Privacy Protocol</fielddescr>
+			<fieldname>v3privproto</fieldname>
+			<type>select</type>
+			<default_value>AES</default_value>
+			<options>
+				<option><name>DES</name><value>DES</value></option>
+				<option><name>AES</name><value>AES</value></option>
+			</options>
+			<description>Privacy (encryption) protocol.</description>
+		</field>
+		<field>
+			<fielddescr>Privacy Password</fielddescr>
+			<fieldname>v3privpass</fieldname>
+			<type>password</type>
+			<size>30</size>
+			<description>Privacy password (minimum 8 characters).</description>
+		</field>
+		<field>
+			<name>Port Monitoring</name>
+			<type>listtopic</type>
+		</field>
+		<field>
+			<fielddescr>Monitor All Ports</fielddescr>
+			<fieldname>monitorall</fieldname>
+			<type>checkbox</type>
+			<default_value>on</default_value>
+			<description>Monitor all ports on this switch.</description>
+			<sethelp>When unchecked, specify individual port indices below.</sethelp>
+			<enablefields>monitorports</enablefields>
+		</field>
+		<field>
+			<fielddescr>Specific Ports</fielddescr>
+			<fieldname>monitorports</fieldname>
+			<type>input</type>
+			<size>40</size>
+			<description>
+				<![CDATA[
+				Comma-separated list of SNMP ifIndex values to monitor (e.g. "1,2,5,10").
+				<br/>Only used when "Monitor All Ports" is unchecked.
+				]]>
+			</description>
+		</field>
+	</fields>
+	<custom_php_validation_command>
+		validate_form_switchmgmt($_POST, $input_errors);
+	</custom_php_validation_command>
+	<custom_php_resync_config_command>
+		sync_package_switchmgmt();
+	</custom_php_resync_config_command>
+	<custom_php_install_command>
+		switchmgmt_install();
+	</custom_php_install_command>
+	<custom_php_deinstall_command>
+		switchmgmt_deinstall();
+	</custom_php_deinstall_command>
+</packagegui>

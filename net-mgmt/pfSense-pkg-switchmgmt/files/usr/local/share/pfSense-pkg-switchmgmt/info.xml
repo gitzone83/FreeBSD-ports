@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<pfsensepkgs>
+	<package>
+		<name>switchmgmt</name>
+		<website>https://www.pfsense.org</website>
+		<descr><![CDATA[Switch Management for pfSense.&lt;br/&gt;
+			Discovers and monitors network switches via SNMP polling. Collects per-port statistics including traffic counters, error counts, and discard counts. Supports SNMPv1, v2c, and v3.&lt;br/&gt;]]></descr>
+		<version>%%PKGVERSION%%</version>
+		<configurationfile>switchmgmt.xml</configurationfile>
+	</package>
+</pfsensepkgs>

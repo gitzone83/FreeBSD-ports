@@ -1,0 +1,6 @@
+Switch Management package for pfSense.<br/>
+Discovers and monitors network switches via SNMP polling. Collects per-port
+statistics including traffic counters (bytes, packets), error counts, and
+discard counts from the IF-MIB. Supports SNMPv1, v2c, and v3.<br/>
+Port counter data is stored in RRD for graphing and SQLite for real-time
+status display.

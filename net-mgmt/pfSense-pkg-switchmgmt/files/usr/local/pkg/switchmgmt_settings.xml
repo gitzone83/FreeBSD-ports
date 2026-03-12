@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<packagegui>
+	<title>Services/Switch Management Settings</title>
+	<name>switchmgmt_settings</name>
+	<version>0.1.0</version>
+	<include_file>/usr/local/pkg/switchmgmt.inc</include_file>
+	<tabs>
+		<tab>
+			<text>Switches</text>
+			<url>/pkg.php?xml=switchmgmt.xml</url>
+		</tab>
+		<tab>
+			<text>Settings</text>
+			<url>/pkg_edit.php?xml=switchmgmt_settings.xml&amp;id=0</url>
+			<active/>
+		</tab>
+		<tab>
+			<text>Status</text>
+			<url>/status_switchmgmt.php</url>
+		</tab>
+	</tabs>
+	<fields>
+		<field>
+			<name>Polling Settings</name>
+			<type>listtopic</type>
+		</field>
+		<field>
+			<fielddescr>Enable Polling</fielddescr>
+			<fieldname>enable</fieldname>
+			<type>checkbox</type>
+			<description>Enable periodic SNMP polling of configured switches.</description>
+		</field>
+		<field>
+			<fielddescr>Polling Interval</fielddescr>
+			<fieldname>pollinterval</fieldname>
+			<type>select</type>
+			<default_value>300</default_value>
+			<options>
+				<option><name>1 minute</name><value>60</value></option>
+				<option><name>5 minutes</name><value>300</value></option>
+				<option><name>10 minutes</name><value>600</value></option>
+				<option><name>15 minutes</name><value>900</value></option>
+				<option><name>30 minutes</name><value>1800</value></option>
+			</options>
+			<description>How often to poll switches for port statistics.</description>
+		</field>
+		<field>
+			<fielddescr>SNMP Timeout</fielddescr>
+			<fieldname>snmptimeout</fieldname>
+			<type>input</type>
+			<size>6</size>
+			<default_value>5</default_value>
+			<description>SNMP request timeout in seconds.</description>
+		</field>
+		<field>
+			<fielddescr>SNMP Retries</fielddescr>
+			<fieldname>snmpretries</fieldname>
+			<type>input</type>
+			<size>4</size>
+			<default_value>2</default_value>
+			<description>Number of SNMP retries on timeout.</description>
+		</field>
+		<field>
+			<name>Data Retention</name>
+			<type>listtopic</type>
+		</field>
+		<field>
+			<fielddescr>RRD Storage</fielddescr>
+			<fieldname>enablerrd</fieldname>
+			<type>checkbox</type>
+			<default_value>on</default_value>
+			<description>Store port counters in RRD for graphing.</description>
+		</field>
+	</fields>
+	<custom_php_validation_command>
+		validate_form_switchmgmt_settings($_POST, $input_errors);
+	</custom_php_validation_command>
+	<custom_php_resync_config_command>
+		sync_package_switchmgmt();
+	</custom_php_resync_config_command>
+</packagegui>

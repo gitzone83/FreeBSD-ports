@@ -1,0 +1,112 @@
+name: Build pfSense-pkg-switchmgmt
+
+on:
+  push:
+    branches: [feature/switchmgmt]
+    paths:
+      - 'net-mgmt/pfSense-pkg-switchmgmt/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build package on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.1"
+          usesh: true
+          run: |
+            set -e
+
+            PKG_NAME="pfSense-pkg-switchmgmt"
+            PKG_VERSION="0.1.0"
+            PORT_DIR="net-mgmt/${PKG_NAME}"
+            STAGEDIR="/tmp/stage"
+            METADIR="/tmp/meta"
+            PREFIX="/usr/local"
+            DATADIR="${PREFIX}/share/${PKG_NAME}"
+
+            echo "==> Staging files"
+            mkdir -p "${STAGEDIR}${PREFIX}/pkg"
+            mkdir -p "${STAGEDIR}${PREFIX}/www"
+            mkdir -p "${STAGEDIR}${DATADIR}"
+            mkdir -p "${STAGEDIR}/etc/inc/priv"
+
+            cp "${PORT_DIR}/files/etc/inc/priv/switchmgmt.priv.inc" \
+               "${STAGEDIR}/etc/inc/priv/"
+            cp "${PORT_DIR}/files${PREFIX}/pkg/switchmgmt.xml" \
+               "${STAGEDIR}${PREFIX}/pkg/"
+            cp "${PORT_DIR}/files${PREFIX}/pkg/switchmgmt_settings.xml" \
+               "${STAGEDIR}${PREFIX}/pkg/"
+            cp "${PORT_DIR}/files${PREFIX}/pkg/switchmgmt.inc" \
+               "${STAGEDIR}${PREFIX}/pkg/"
+            cp "${PORT_DIR}/files${PREFIX}/pkg/switchmgmt_poll.php" \
+               "${STAGEDIR}${PREFIX}/pkg/"
+            cp "${PORT_DIR}/files${PREFIX}/www/status_switchmgmt.php" \
+               "${STAGEDIR}${PREFIX}/www/"
+            cp "${PORT_DIR}/files${DATADIR}/info.xml" \
+               "${STAGEDIR}${DATADIR}/"
+
+            # Substitute version
+            sed -i '' "s|%%PKGVERSION%%|${PKG_VERSION}|g" \
+               "${STAGEDIR}${DATADIR}/info.xml"
+
+            echo "==> Creating package manifest"
+            mkdir -p "${METADIR}"
+            cat > "${METADIR}/+MANIFEST" <<MANIFEST
+            name: ${PKG_NAME}
+            version: "${PKG_VERSION}"
+            origin: net-mgmt/${PKG_NAME}
+            comment: "pfSense Switch Management package"
+            maintainer: "coreteam@pfsense.org"
+            www: "https://www.pfsense.org"
+            prefix: /
+            desc: "SNMP-based switch monitoring for pfSense. Polls network switches for per-port traffic counters, error counts, and discards."
+            categories: [net-mgmt]
+            deps:
+              net-snmp:
+                origin: net-mgmt/net-snmp
+                version: "5.0"
+            scripts:
+              post-install: |
+                /usr/local/bin/php -f /etc/rc.packages ${PKG_NAME} POST-INSTALL
+              pre-deinstall: |
+                /usr/local/bin/php -f /etc/rc.packages ${PKG_NAME} DEINSTALL
+            MANIFEST
+
+            # Strip leading whitespace from manifest (heredoc indentation)
+            sed -i '' 's/^            //' "${METADIR}/+MANIFEST"
+
+            echo "==> Creating plist"
+            cat > "${METADIR}/+COMPACT_MANIFEST" <<COMPACT
+            name: ${PKG_NAME}
+            version: "${PKG_VERSION}"
+            origin: net-mgmt/${PKG_NAME}
+            COMPACT
+            sed -i '' 's/^            //' "${METADIR}/+COMPACT_MANIFEST"
+
+            # Generate plist from staged files
+            (cd "${STAGEDIR}" && find . -type f | sed 's|^\./||' | sort) > "${METADIR}/plist"
+
+            echo "==> Building .pkg"
+            pkg create -o /tmp/pkg-output -p "${METADIR}/plist" -r "${STAGEDIR}" -m "${METADIR}"
+
+            echo "==> Package built:"
+            ls -la /tmp/pkg-output/
+            cp /tmp/pkg-output/*.pkg "/tmp/${PKG_NAME}-${PKG_VERSION}.pkg"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pfSense-pkg-switchmgmt
+          path: /tmp/pfSense-pkg-switchmgmt-*.pkg
+
+      - name: Create release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /tmp/pfSense-pkg-switchmgmt-*.pkg

@@ -110,14 +110,14 @@ jobs:
             echo "==> Package built:"
             ls -la /tmp/pkg-output/
 
-            # Copy to a predictable path for the upload step
-            cp /tmp/pkg-output/*.pkg "/tmp/${PKG_NAME}-${PKG_VERSION}.pkg"
+            # Copy to workspace so the upload step (on the host) can find it
+            cp /tmp/pkg-output/*.pkg "${GITHUB_WORKSPACE}/${PKG_NAME}-${PKG_VERSION}.pkg"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pfSense-pkg-switchmgmt
-          path: /tmp/pfSense-pkg-switchmgmt-*.pkg
+          path: pfSense-pkg-switchmgmt-*.pkg
 
       - name: Create release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')

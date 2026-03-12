@@ -5,6 +5,7 @@ on:
     branches: [feature/switchmgmt]
     paths:
       - 'net-mgmt/pfSense-pkg-switchmgmt/**'
+      - '.github/workflows/build-switchmgmt.yml'
   workflow_dispatch:
 
 jobs:
@@ -13,6 +14,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            net-mgmt/pfSense-pkg-switchmgmt
+          sparse-checkout-cone-mode: false
 
       - name: Build package on FreeBSD
         uses: vmactions/freebsd-vm@v1
@@ -51,52 +56,61 @@ jobs:
             cp "${PORT_DIR}/files${DATADIR}/info.xml" \
                "${STAGEDIR}${DATADIR}/"
 
-            # Substitute version
             sed -i '' "s|%%PKGVERSION%%|${PKG_VERSION}|g" \
                "${STAGEDIR}${DATADIR}/info.xml"
 
-            echo "==> Creating package manifest"
+            echo "==> Creating package manifest (UCL format)"
             mkdir -p "${METADIR}"
-            cat > "${METADIR}/+MANIFEST" <<MANIFEST
-            name: ${PKG_NAME}
-            version: "${PKG_VERSION}"
-            origin: net-mgmt/${PKG_NAME}
+            cat > "${METADIR}/+MANIFEST" <<'ENDMANIFEST'
+            name: "pfSense-pkg-switchmgmt"
+            version: "0.1.0"
+            origin: "net-mgmt/pfSense-pkg-switchmgmt"
             comment: "pfSense Switch Management package"
             maintainer: "coreteam@pfsense.org"
             www: "https://www.pfsense.org"
-            prefix: /
+            prefix: "/"
             desc: "SNMP-based switch monitoring for pfSense. Polls network switches for per-port traffic counters, error counts, and discards."
-            categories: [net-mgmt]
-            deps:
-              net-snmp:
-                origin: net-mgmt/net-snmp
+            categories: ["net-mgmt"]
+            deps: {
+              "net-snmp": {
+                origin: "net-mgmt/net-snmp",
                 version: "5.0"
-            scripts:
-              post-install: |
-                /usr/local/bin/php -f /etc/rc.packages ${PKG_NAME} POST-INSTALL
-              pre-deinstall: |
-                /usr/local/bin/php -f /etc/rc.packages ${PKG_NAME} DEINSTALL
-            MANIFEST
-
-            # Strip leading whitespace from manifest (heredoc indentation)
+              }
+            }
+            ENDMANIFEST
             sed -i '' 's/^            //' "${METADIR}/+MANIFEST"
 
-            echo "==> Creating plist"
-            cat > "${METADIR}/+COMPACT_MANIFEST" <<COMPACT
-            name: ${PKG_NAME}
-            version: "${PKG_VERSION}"
-            origin: net-mgmt/${PKG_NAME}
-            COMPACT
-            sed -i '' 's/^            //' "${METADIR}/+COMPACT_MANIFEST"
+            echo "==> Creating install/deinstall scripts"
+            cat > "${METADIR}/+POST_INSTALL" <<'ENDSCRIPT'
+            #!/bin/sh
+            /usr/local/bin/php -f /etc/rc.packages pfSense-pkg-switchmgmt POST-INSTALL
+            ENDSCRIPT
+            sed -i '' 's/^            //' "${METADIR}/+POST_INSTALL"
+            chmod +x "${METADIR}/+POST_INSTALL"
 
-            # Generate plist from staged files
+            cat > "${METADIR}/+PRE_DEINSTALL" <<'ENDSCRIPT'
+            #!/bin/sh
+            /usr/local/bin/php -f /etc/rc.packages pfSense-pkg-switchmgmt DEINSTALL
+            ENDSCRIPT
+            sed -i '' 's/^            //' "${METADIR}/+PRE_DEINSTALL"
+            chmod +x "${METADIR}/+PRE_DEINSTALL"
+
+            echo "==> Generating plist"
             (cd "${STAGEDIR}" && find . -type f | sed 's|^\./||' | sort) > "${METADIR}/plist"
 
+            echo "==> Contents of +MANIFEST:"
+            cat "${METADIR}/+MANIFEST"
+            echo "==> Contents of plist:"
+            cat "${METADIR}/plist"
+
             echo "==> Building .pkg"
+            mkdir -p /tmp/pkg-output
             pkg create -o /tmp/pkg-output -p "${METADIR}/plist" -r "${STAGEDIR}" -m "${METADIR}"
 
             echo "==> Package built:"
             ls -la /tmp/pkg-output/
+
+            # Copy to a predictable path for the upload step
             cp /tmp/pkg-output/*.pkg "/tmp/${PKG_NAME}-${PKG_VERSION}.pkg"
 
       - name: Upload artifact

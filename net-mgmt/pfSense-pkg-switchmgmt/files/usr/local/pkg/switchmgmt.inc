@@ -152,11 +152,162 @@ define('OID_IFALIAS',        '.1.3.6.1.2.1.31.1.1.1.18');
 define('OID_IFNAME',         '.1.3.6.1.2.1.31.1.1.1.1');
 
 /* ============================================================
+ * SNMP value normalization
+ *
+ * Some switches (e.g. EdgeCore) return textual enum names instead
+ * of integer values for ifType, ifAdminStatus, ifOperStatus.
+ * These maps convert text back to the standard integer values.
+ * ============================================================ */
+
+$GLOBALS['switchmgmt_snmp_enum_maps'] = array(
+	'ifAdminStatus' => array(
+		'up'      => 1,
+		'down'    => 2,
+		'testing' => 3,
+	),
+	'ifOperStatus' => array(
+		'up'             => 1,
+		'down'           => 2,
+		'testing'        => 3,
+		'unknown'        => 4,
+		'dormant'        => 5,
+		'notPresent'     => 6,
+		'lowerLayerDown' => 7,
+	),
+	'ifType' => array(
+		'ethernetCsmacd'   => 6,
+		'softwareLoopback' => 24,
+		'rs232'            => 33,
+		'propVirtual'      => 53,
+		'tunnel'           => 131,
+		'l3ipvlan'         => 136,
+		'ieee8023adLag'    => 161,
+	),
+);
+
+/**
+ * Normalize an SNMP value that may be a textual enum name to its integer.
+ */
+function switchmgmt_normalize_snmp_value($field, $value) {
+	if (is_numeric($value)) {
+		return (int)$value;
+	}
+
+	$maps = $GLOBALS['switchmgmt_snmp_enum_maps'];
+	if (isset($maps[$field])) {
+		$text = trim($value);
+		if (isset($maps[$field][$text])) {
+			return $maps[$field][$text];
+		}
+		$lower = strtolower($text);
+		foreach ($maps[$field] as $name => $num) {
+			if (strtolower($name) === $lower) {
+				return $num;
+			}
+		}
+	}
+
+	switchmgmt_log("Unknown SNMP enum value for {$field}: '{$value}'", LOG_WARNING);
+	return 0;
+}
+
+/* ============================================================
+ * Vendor detection and interface filtering
+ *
+ * Different switch vendors expose different non-physical interface
+ * types. The framework detects the vendor from sysObjectID/sysDescr
+ * and applies vendor-specific ifType exclusion lists.
+ *
+ * To add a new vendor, add an entry before 'default' in
+ * switchmgmt_get_vendor_filters().
+ * ============================================================ */
+
+function switchmgmt_get_vendor_filters() {
+	return array(
+		'edgecore' => array(
+			'name' => 'EdgeCore',
+			'match' => function($sysinfo) {
+				$oid = $sysinfo['sysobjectid'] ?? '';
+				$descr = $sysinfo['sysdescr'] ?? '';
+				return (strpos($oid, '.1.3.6.1.4.1.259') === 0)
+					|| (stripos($descr, 'edgecore') !== false)
+					|| (stripos($descr, 'accton') !== false);
+			},
+			'exclude_types' => array(
+				33,  // rs232 (console port)
+				24,  // softwareLoopback
+				136, // l3ipvlan (VLAN interfaces)
+			),
+			// Port capability map per model.
+			// Keyed by sysDescr substring match -> array of port range definitions.
+			// ifHighSpeed reports transceiver speed, not port capability,
+			// so we need hardware knowledge for accurate max speed.
+			'port_capabilities' => array(
+				'ECS4155' => array(
+					array('start' => 1, 'end' => 24, 'maxspeed' => 2500),
+					array('start' => 25, 'end' => 30, 'maxspeed' => 25000),
+				),
+			),
+		),
+		'default' => array(
+			'name' => 'Generic',
+			'match' => function($sysinfo) { return true; },
+			'exclude_types' => array(
+				24,  // softwareLoopback
+			),
+		),
+	);
+}
+
+function switchmgmt_detect_vendor($sysinfo) {
+	$filters = switchmgmt_get_vendor_filters();
+	foreach ($filters as $key => $vendor) {
+		if ($key === 'default') {
+			continue;
+		}
+		if (call_user_func($vendor['match'], $sysinfo)) {
+			switchmgmt_log("Detected vendor: {$vendor['name']}", LOG_INFO);
+			return $vendor;
+		}
+	}
+	return $filters['default'];
+}
+
+function switchmgmt_should_exclude_interface($iftype, $vendor) {
+	return in_array((int)$iftype, $vendor['exclude_types'], true);
+}
+
+/**
+ * Get the true port capability (max speed in Mbps) for a port.
+ * Uses vendor-specific port capability maps when available,
+ * falling back to ifHighSpeed.
+ */
+function switchmgmt_get_port_capability($vendor, $sysinfo, $ifindex, $fallback_speed) {
+	if (!isset($vendor['port_capabilities'])) {
+		return (int)$fallback_speed;
+	}
+
+	$descr = $sysinfo['sysdescr'] ?? '';
+	foreach ($vendor['port_capabilities'] as $model => $ranges) {
+		if (stripos($descr, $model) !== false) {
+			$idx = (int)$ifindex;
+			foreach ($ranges as $range) {
+				if ($idx >= $range['start'] && $idx <= $range['end']) {
+					return (int)$range['maxspeed'];
+				}
+			}
+		}
+	}
+
+	return (int)$fallback_speed;
+}
+
+/* ============================================================
  * Config helpers
  * ============================================================ */
 
 function switchmgmt_get_settings() {
-	$settings = config_get_path('installedpackages/switchmgmt_settings/config/0');
+	$settings = config_get_path('installedpackages/switchmgmtsettings/config/0');
 	if (!is_array($settings)) {
 		$settings = array();
 	}
@@ -208,6 +359,7 @@ function switchmgmt_db_open() {
 			iftype INTEGER,
 			ifspeed BIGINT,
 			ifhighspeed INTEGER,
+			ifmaxspeed INTEGER DEFAULT 0,
 			ifadminstatus INTEGER,
 			ifoperstatus INTEGER,
 			in_octets BIGINT DEFAULT 0,
@@ -271,15 +423,18 @@ function switchmgmt_db_mark_unreachable($db, $ipaddr) {
  * Update or insert port data.
  */
 function switchmgmt_db_update_port($db, $switch_ip, $ifindex, $portdata) {
+	$hispeed = (int)($portdata['ifhighspeed'] ?? 0);
+	$maxspeed = (int)($portdata['ifmaxspeed'] ?? $hispeed);
 	$stmt = $db->prepare("
-		INSERT INTO ports (switch_ip, ifindex, ifdescr, ifname, ifalias, iftype, ifspeed, ifhighspeed,
+		INSERT INTO ports (switch_ip, ifindex, ifdescr, ifname, ifalias, iftype, ifspeed, ifhighspeed, ifmaxspeed,
 			ifadminstatus, ifoperstatus, in_octets, out_octets, in_ucast_pkts, out_ucast_pkts,
 			in_errors, out_errors, in_discards, out_discards, last_updated)
-		VALUES (:sw, :idx, :descr, :name, :alias, :type, :speed, :hispeed,
+		VALUES (:sw, :idx, :descr, :name, :alias, :type, :speed, :hispeed, :maxspeed,
 			:admin, :oper, :ino, :outo, :inp, :outp, :ine, :oute, :ind, :outd, :time)
 		ON CONFLICT(switch_ip, ifindex) DO UPDATE SET
 			ifdescr = :descr, ifname = :name, ifalias = :alias, iftype = :type,
 			ifspeed = :speed, ifhighspeed = :hispeed,
+			ifmaxspeed = MAX(COALESCE(ifmaxspeed, 0), :maxspeed),
 			ifadminstatus = :admin, ifoperstatus = :oper,
 			in_octets = :ino, out_octets = :outo,
 			in_ucast_pkts = :inp, out_ucast_pkts = :outp,
@@ -294,7 +449,8 @@ function switchmgmt_db_update_port($db, $switch_ip, $ifindex, $portdata) {
 	$stmt->bindValue(':alias', $portdata['ifalias'] ?? '', SQLITE3_TEXT);
 	$stmt->bindValue(':type', (int)($portdata['iftype'] ?? 0), SQLITE3_INTEGER);
 	$stmt->bindValue(':speed', $portdata['ifspeed'] ?? 0, SQLITE3_INTEGER);
-	$stmt->bindValue(':hispeed', (int)($portdata['ifhighspeed'] ?? 0), SQLITE3_INTEGER);
+	$stmt->bindValue(':hispeed', $hispeed, SQLITE3_INTEGER);
+	$stmt->bindValue(':maxspeed', $maxspeed, SQLITE3_INTEGER);
 	$stmt->bindValue(':admin', (int)($portdata['ifadminstatus'] ?? 0), SQLITE3_INTEGER);
 	$stmt->bindValue(':oper', (int)($portdata['ifoperstatus'] ?? 0), SQLITE3_INTEGER);
 	$stmt->bindValue(':ino', $portdata['in_octets'] ?? 0, SQLITE3_INTEGER);
@@ -434,6 +590,9 @@ function switchmgmt_poll_switch($sw) {
 	);
 	switchmgmt_db_update_switch($db, $ip, $sysinfo);
 
+	// Detect vendor for interface filtering
+	$vendor = switchmgmt_detect_vendor($sysinfo);
+
 	// Walk interface table
 	$ifdescrs = switchmgmt_walk_indexed($sw, OID_IFDESCR);
 	if ($ifdescrs === false || empty($ifdescrs)) {
@@ -455,6 +614,17 @@ function switchmgmt_poll_switch($sw) {
 	$ifhighspeeds = switchmgmt_walk_indexed($sw, OID_IFHIGHSPEED) ?: array();
 	$ifadmin      = switchmgmt_walk_indexed($sw, OID_IFADMINSTATUS) ?: array();
 	$ifoper       = switchmgmt_walk_indexed($sw, OID_IFOPERSTATUS) ?: array();
+
+	// Normalize text enum values to integers (handles vendors that return text)
+	foreach ($iftypes as $idx => $val) {
+		$iftypes[$idx] = switchmgmt_normalize_snmp_value('ifType', $val);
+	}
+	foreach ($ifadmin as $idx => $val) {
+		$ifadmin[$idx] = switchmgmt_normalize_snmp_value('ifAdminStatus', $val);
+	}
+	foreach ($ifoper as $idx => $val) {
+		$ifoper[$idx] = switchmgmt_normalize_snmp_value('ifOperStatus', $val);
+	}
 
 	// Try 64-bit counters first, fall back to 32-bit
 	$inoctets  = switchmgmt_walk_indexed($sw, OID_IFHCINOCTETS);
@@ -478,11 +648,23 @@ function switchmgmt_poll_switch($sw) {
 	$settings = switchmgmt_get_settings();
 	$rrd_enabled = (!isset($settings['enablerrd']) || $settings['enablerrd'] == 'on');
 
+	$excluded_indices = array();
 	$db->exec("BEGIN TRANSACTION");
 	foreach ($monitor_indices as $idx) {
 		if (!isset($ifdescrs[$idx])) {
 			continue;
 		}
+
+		// Filter out non-physical interfaces based on vendor rules
+		$normalized_type = $iftypes[$idx] ?? 0;
+		if (switchmgmt_should_exclude_interface($normalized_type, $vendor)) {
+			$excluded_indices[] = (int)$idx;
+			continue;
+		}
+
+		$capability = switchmgmt_get_port_capability(
+			$vendor, $sysinfo, $idx, $ifhighspeeds[$idx] ?? 0
+		);
 
 		$portdata = array(
 			'ifdescr'        => $ifdescrs[$idx] ?? '',
@@ -491,6 +673,7 @@ function switchmgmt_poll_switch($sw) {
 			'iftype'         => $iftypes[$idx] ?? 0,
 			'ifspeed'        => $ifspeeds[$idx] ?? 0,
 			'ifhighspeed'    => $ifhighspeeds[$idx] ?? 0,
+			'ifmaxspeed'     => $capability,
 			'ifadminstatus'  => $ifadmin[$idx] ?? 0,
 			'ifoperstatus'   => $ifoper[$idx] ?? 0,
 			'in_octets'      => $inoctets[$idx] ?? 0,
@@ -511,6 +694,21 @@ function switchmgmt_poll_switch($sw) {
 		}
 	}
 	$db->exec("COMMIT");
+
+	// Clean up any previously-stored excluded interfaces
+	if (!empty($excluded_indices)) {
+		$placeholders = implode(',', array_fill(0, count($excluded_indices), '?'));
+		$stmt = $db->prepare(
+			"DELETE FROM ports WHERE switch_ip = ? AND ifindex IN ({$placeholders})"
+		);
+		$stmt->bindValue(1, $ip, SQLITE3_TEXT);
+		$i = 2;
+		foreach ($excluded_indices as $ifidx) {
+			$stmt->bindValue($i++, $ifidx, SQLITE3_INTEGER);
+		}
+		$stmt->execute();
+	}
+
 	$db->close();
 
 	switchmgmt_log("Polled switch {$ip} ({$sysname}): " . count($monitor_indices) . " ports");
@@ -578,13 +776,17 @@ function switchmgmt_get_port_status($switch_ip) {
 
 function switchmgmt_oper_status_text($status) {
 	$map = array(1 => 'up', 2 => 'down', 3 => 'testing', 4 => 'unknown',
-		5 => 'dormant', 6 => 'notPresent', 7 => 'lowerLayerDown');
-	return $map[(int)$status] ?? 'unknown';
+		5 => 'down', 6 => 'down', 7 => 'down');
+	$status = is_numeric($status) ? (int)$status
+		: switchmgmt_normalize_snmp_value('ifOperStatus', $status);
+	return $map[$status] ?? 'unknown';
 }
 
 function switchmgmt_admin_status_text($status) {
 	$map = array(1 => 'up', 2 => 'down', 3 => 'testing');
-	return $map[(int)$status] ?? 'unknown';
+	$status = is_numeric($status) ? (int)$status
+		: switchmgmt_normalize_snmp_value('ifAdminStatus', $status);
+	return $map[$status] ?? 'unknown';
 }
 
 function switchmgmt_format_speed($speed_bps, $highspeed_mbps = 0) {

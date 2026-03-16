@@ -14,16 +14,16 @@
 	</menu>
 	<tabs>
 		<tab>
+			<text>Settings</text>
+			<url>/pkg_edit.php?xml=switchmgmt_settings.xml&amp;id=0</url>
+		</tab>
+		<tab>
 			<text>Switches</text>
 			<url>/pkg.php?xml=switchmgmt.xml</url>
 			<active/>
 		</tab>
 		<tab>
-			<text>Settings</text>
-			<url>/pkg_edit.php?xml=switchmgmt_settings.xml&amp;id=0</url>
-		</tab>
-		<tab>
-			<text>Status</text>
+			<text>Switch Status</text>
 			<url>/status_switchmgmt.php</url>
 		</tab>
 	</tabs>

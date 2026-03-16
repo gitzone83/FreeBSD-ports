@@ -30,7 +30,7 @@ jobs:
             set -e
 
             PKG_NAME="pfSense-pkg-switchmgmt"
-            PKG_VERSION="0.1.0"
+            PKG_VERSION="0.1.1"
             PORT_DIR="net-mgmt/${PKG_NAME}"
             STAGEDIR="/tmp/stage"
             METADIR="/tmp/meta"

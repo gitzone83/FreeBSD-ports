@@ -21,7 +21,14 @@ define('SWITCHMGMT_LOG_PREFIX', 'switchmgmt');
  * ============================================================ */
 
 function switchmgmt_log($msg, $level = LOG_NOTICE) {
-	logger($level, localize_text("switchmgmt: %s", $msg));
+	$text = "switchmgmt: {$msg}";
+	if (function_exists('logger')) {
+		logger($level, $text);
+	} elseif (function_exists('log_error')) {
+		log_error($text);
+	} else {
+		syslog($level, $text);
+	}
 }
 
 /* ============================================================

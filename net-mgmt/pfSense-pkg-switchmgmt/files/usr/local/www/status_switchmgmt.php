@@ -34,6 +34,12 @@ if ($_POST) {
 				break;
 			}
 		}
+	} elseif ($_POST['assign_profile'] && !empty($_POST['switch_ip'])) {
+		$profile_assignments = $_POST['profile'] ?? array();
+		foreach ($profile_assignments as $ifindex => $profile_id) {
+			switchmgmt_assignment_set($_POST['switch_ip'], $ifindex, $profile_id);
+		}
+		$savemsg = gettext("Profile assignments saved.");
 	}
 }
 
@@ -56,6 +62,8 @@ if (!isset($settings['enable']) || $settings['enable'] != 'on') {
 
 if ($savemsg) {
 	print_info_box($savemsg, 'success');
+	// Scroll to message after page load
+	echo '<script>document.addEventListener("DOMContentLoaded",function(){window.scrollTo(0,0);});</script>';
 }
 
 /* Tabs */
@@ -63,6 +71,7 @@ $tab_array = array();
 $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_settings.xml&id=0");
 $tab_array[] = array(gettext("Switches"), false, "/pkg.php?xml=switchmgmt.xml");
 $tab_array[] = array(gettext("Switch Status"), true, "/status_switchmgmt.php");
+$tab_array[] = array(gettext("Switch Port Profiles"), false, "/profiles_switchmgmt.php");
 $tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 
@@ -137,7 +146,8 @@ $switch_list = switchmgmt_get_switch_status();
 
 <?php if (!empty($selected_switch)):
 	$ports = switchmgmt_get_port_status($selected_switch);
-	$neighbors = switchmgmt_get_neighbors($selected_switch);
+	$profiles = switchmgmt_profile_get_all();
+	$assignments = switchmgmt_assignment_get_for_switch($selected_switch);
 	// Find the config description for this switch
 	$sw_desc = $selected_switch;
 	$switches_config = switchmgmt_get_switches();
@@ -155,6 +165,9 @@ $switch_list = switchmgmt_get_switch_status();
 		<h2 class="panel-title"><?=sprintf(gettext("Port Details: %s"), htmlspecialchars($sw_desc))?></h2>
 	</div>
 	<div class="panel-body">
+		<form action="status_switchmgmt.php" method="post">
+		<input type="hidden" name="switch_ip" value="<?=htmlspecialchars($selected_switch)?>"/>
+		<input type="hidden" name="switch" value="<?=htmlspecialchars($selected_switch)?>"/>
 		<div class="table-responsive">
 			<table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
 				<thead>
@@ -166,7 +179,7 @@ $switch_list = switchmgmt_get_switch_status();
 						<th colspan="2" style="text-align:center"><?=gettext("Packets")?></th>
 						<th colspan="2" style="text-align:center"><?=gettext("Errors")?></th>
 						<th colspan="2" style="text-align:center"><?=gettext("Discards")?></th>
-						<th rowspan="2"><?=gettext("Neighbor")?></th>
+						<th rowspan="2"><?=gettext("Profile")?></th>
 					</tr>
 					<tr>
 						<th><?=gettext("Capability")?></th>
@@ -233,15 +246,32 @@ $switch_list = switchmgmt_get_switch_status();
 							<?=number_format($port['out_discards'])?>
 <?php endif; ?>
 						</td>
-						<td>
+						<td style="white-space:nowrap;">
 <?php
-	$nb = $neighbors[$port['ifindex']] ?? null;
-	if ($nb && (!empty($nb['remote_sysname']) || !empty($nb['remote_mgmtaddr']))) {
-		$nb_label = $nb['remote_sysname'] ?: $nb['remote_mgmtaddr'] ?: $nb['remote_chassisid'];
-		$nb_port = $nb['remote_port'] ? switchmgmt_format_port_name($nb['remote_port']) : '';
-		echo htmlspecialchars($nb_label . ($nb_port ? ':' . $nb_port : ''));
-	} else {
-		echo '-';
+	$cur_assign = $assignments[$port['ifindex']] ?? null;
+	$cur_pid = ($cur_assign && $cur_assign['sync_status'] != 'removing') ? $cur_assign['profile_id'] : '';
+?>
+							<select name="profile[<?=$port['ifindex']?>]" class="form-control input-sm" style="height:24px;padding:1px 4px;font-size:12px;display:inline-block;width:auto;">
+								<option value="">--</option>
+<?php foreach ($profiles as $p): ?>
+								<option value="<?=$p['id']?>" <?=$cur_pid == $p['id'] ? 'selected' : ''?>><?=htmlspecialchars($p['name'])?></option>
+<?php endforeach; ?>
+							</select>
+<?php
+	$pa = $assignments[$port['ifindex']] ?? null;
+	if ($pa) {
+		$ss = $pa['sync_status'];
+		if ($ss == 'synced') {
+			echo '<i class="fa-solid fa-check text-success" title="' . gettext("Synced") . ' ' . date('Y-m-d H:i', $pa['last_synced']) . '"></i>';
+		} elseif ($ss == 'failed') {
+			echo '<i class="fa-solid fa-times text-danger" title="' . gettext("Push failed") . '"></i>';
+		} elseif ($ss == 'drift') {
+			echo '<i class="fa-solid fa-exclamation-triangle text-warning" title="' . gettext("Config drift detected") . '"></i>';
+		} elseif ($ss == 'removing') {
+			echo '<i class="fa-solid fa-undo text-warning" title="' . gettext("Will be reset to default on next push") . '"></i>';
+		} else {
+			echo '<i class="fa-solid fa-clock-o text-muted" title="' . gettext("Pending - not yet pushed") . '"></i>';
+		}
 	}
 ?>
 						</td>
@@ -251,6 +281,33 @@ $switch_list = switchmgmt_get_switch_status();
 				</tbody>
 			</table>
 		</div>
+		<div style="margin-top:8px; margin-bottom:8px; text-align:right;">
+			<label style="margin-right:4px;"><?=gettext("Apply to all ports:")?></label>
+			<select id="bulk_profile" class="form-control input-sm" style="width:auto;display:inline-block;height:24px;padding:1px 4px;font-size:12px;">
+				<option value="">--</option>
+<?php foreach ($profiles as $p): ?>
+				<option value="<?=$p['id']?>"><?=htmlspecialchars($p['name'])?></option>
+<?php endforeach; ?>
+			</select>
+			<button type="button" class="btn btn-default btn-xs" onclick="$('select[name^=profile]').val($('#bulk_profile').val());">
+				<i class="fa-solid fa-check icon-embed-btn"></i><?=gettext("Apply")?>
+			</button>
+		</div>
+		<nav class="action-buttons">
+			<button class="btn btn-primary btn-sm" type="submit" name="assign_profile" value="1">
+				<i class="fa-solid fa-save icon-embed-btn"></i>
+				<?=gettext("Save Assignments")?>
+			</button>
+			<button type="button" class="btn btn-default btn-sm" onclick="window.location.reload();">
+				<i class="fa-solid fa-undo icon-embed-btn"></i>
+				<?=gettext("Reset Assignments")?>
+			</button>
+			<a class="btn btn-info btn-sm" href="preview_switchmgmt.php?switch=<?=urlencode($selected_switch)?>">
+				<i class="fa-solid fa-eye icon-embed-btn"></i>
+				<?=gettext("Preview Config")?>
+			</a>
+		</nav>
+		</form>
 	</div>
 </div>
 

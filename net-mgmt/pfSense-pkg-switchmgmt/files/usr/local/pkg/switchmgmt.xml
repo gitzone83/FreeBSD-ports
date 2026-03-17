@@ -27,6 +27,10 @@
 			<url>/status_switchmgmt.php</url>
 		</tab>
 		<tab>
+			<text>Switch Port Profiles</text>
+			<url>/profiles_switchmgmt.php</url>
+		</tab>
+		<tab>
 			<text>Neighbors</text>
 			<url>/neighbors_switchmgmt.php</url>
 		</tab>
@@ -155,6 +159,50 @@
 			<type>password</type>
 			<size>30</size>
 			<description>Privacy password (minimum 8 characters).</description>
+		</field>
+		<field>
+			<name>SSH Credentials</name>
+			<type>listtopic</type>
+		</field>
+		<field>
+			<name>SSH Help</name>
+			<type>info</type>
+			<description>
+				<![CDATA[
+				SSH credentials are used for configuration push (port profiles).
+				Leave blank if only using SNMP monitoring.
+				]]>
+			</description>
+		</field>
+		<field>
+			<fielddescr>SSH Username</fielddescr>
+			<fieldname>ssh_username</fieldname>
+			<type>input</type>
+			<size>20</size>
+			<default_value>admin</default_value>
+			<description>SSH login username.</description>
+		</field>
+		<field>
+			<fielddescr>SSH Password</fielddescr>
+			<fieldname>ssh_password</fieldname>
+			<type>password</type>
+			<size>30</size>
+			<description>SSH login password.</description>
+		</field>
+		<field>
+			<fielddescr>Enable Password</fielddescr>
+			<fieldname>ssh_enable_password</fieldname>
+			<type>password</type>
+			<size>30</size>
+			<description>Privilege escalation password (Cisco "enable"). Leave blank if not needed.</description>
+		</field>
+		<field>
+			<fielddescr>SSH Port</fielddescr>
+			<fieldname>ssh_port</fieldname>
+			<type>input</type>
+			<size>6</size>
+			<default_value>22</default_value>
+			<description>SSH port number (default 22).</description>
 		</field>
 		<field>
 			<name>Port Monitoring</name>

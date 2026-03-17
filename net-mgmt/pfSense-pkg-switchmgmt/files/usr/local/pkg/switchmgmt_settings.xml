@@ -19,6 +19,10 @@
 			<url>/status_switchmgmt.php</url>
 		</tab>
 		<tab>
+			<text>Switch Port Profiles</text>
+			<url>/profiles_switchmgmt.php</url>
+		</tab>
+		<tab>
 			<text>Neighbors</text>
 			<url>/neighbors_switchmgmt.php</url>
 		</tab>

@@ -472,6 +472,33 @@ function switchmgmt_db_open() {
 			UNIQUE(switch_ip, local_port, remote_chassisid)
 		);
 		CREATE INDEX IF NOT EXISTS idx_neighbors_switch ON neighbors (switch_ip);
+		CREATE TABLE IF NOT EXISTS profiles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT UNIQUE NOT NULL,
+			description TEXT DEFAULT '',
+			vlan_mode TEXT DEFAULT 'access' CHECK(vlan_mode IN ('access','trunk','hybrid')),
+			access_vlan INTEGER DEFAULT 1,
+			trunk_allowed TEXT DEFAULT '',
+			trunk_native INTEGER DEFAULT 1,
+			poe_enabled INTEGER DEFAULT 0,
+			speed TEXT DEFAULT 'auto',
+			duplex TEXT DEFAULT 'auto',
+			enabled INTEGER DEFAULT 1,
+			created INTEGER,
+			updated INTEGER
+		);
+		CREATE TABLE IF NOT EXISTS port_assignments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			switch_ip TEXT NOT NULL,
+			ifindex INTEGER NOT NULL,
+			profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+			assigned_at INTEGER,
+			last_synced INTEGER DEFAULT NULL,
+			sync_status TEXT DEFAULT 'pending' CHECK(sync_status IN ('pending','synced','failed','drift','removing')),
+			UNIQUE(switch_ip, ifindex)
+		);
+		CREATE INDEX IF NOT EXISTS idx_port_assignments_switch ON port_assignments (switch_ip);
+		CREATE INDEX IF NOT EXISTS idx_port_assignments_profile ON port_assignments (profile_id);
 	");
 
 	return $db;
@@ -728,6 +755,409 @@ function switchmgmt_get_all_neighbors() {
 	}
 	$db->close();
 	return $results;
+}
+
+/* ============================================================
+ * Profile management
+ * ============================================================ */
+
+function switchmgmt_profile_get_all() {
+	$db = switchmgmt_db_open();
+	if (!$db) return array();
+	$res = $db->query("SELECT * FROM profiles ORDER BY name");
+	$results = array();
+	while ($row = $res->fetchArray(SQLITE3_ASSOC)) {
+		$results[] = $row;
+	}
+	$db->close();
+	return $results;
+}
+
+function switchmgmt_profile_get($id) {
+	$db = switchmgmt_db_open();
+	if (!$db) return false;
+	$stmt = $db->prepare("SELECT * FROM profiles WHERE id = :id");
+	$stmt->bindValue(':id', (int)$id, SQLITE3_INTEGER);
+	$res = $stmt->execute();
+	$row = $res->fetchArray(SQLITE3_ASSOC);
+	$db->close();
+	return $row ?: false;
+}
+
+function switchmgmt_profile_save($data) {
+	$db = switchmgmt_db_open();
+	if (!$db) return false;
+	$now = time();
+
+	if (!empty($data['id'])) {
+		$stmt = $db->prepare("
+			UPDATE profiles SET
+				name = :name, description = :desc, vlan_mode = :mode,
+				access_vlan = :avlan, trunk_allowed = :tallowed, trunk_native = :tnative,
+				poe_enabled = :poe, speed = :speed, duplex = :duplex,
+				enabled = :enabled, updated = :updated
+			WHERE id = :id
+		");
+		$stmt->bindValue(':id', (int)$data['id'], SQLITE3_INTEGER);
+		$stmt->bindValue(':updated', $now, SQLITE3_INTEGER);
+	} else {
+		$stmt = $db->prepare("
+			INSERT INTO profiles (name, description, vlan_mode, access_vlan, trunk_allowed,
+				trunk_native, poe_enabled, speed, duplex, enabled, created, updated)
+			VALUES (:name, :desc, :mode, :avlan, :tallowed, :tnative, :poe, :speed, :duplex,
+				:enabled, :created, :updated)
+		");
+		$stmt->bindValue(':created', $now, SQLITE3_INTEGER);
+		$stmt->bindValue(':updated', $now, SQLITE3_INTEGER);
+	}
+
+	$stmt->bindValue(':name', $data['name'], SQLITE3_TEXT);
+	$stmt->bindValue(':desc', $data['description'] ?? '', SQLITE3_TEXT);
+	$stmt->bindValue(':mode', $data['vlan_mode'] ?? 'access', SQLITE3_TEXT);
+	$stmt->bindValue(':avlan', (int)($data['access_vlan'] ?? 1), SQLITE3_INTEGER);
+	$stmt->bindValue(':tallowed', $data['trunk_allowed'] ?? '', SQLITE3_TEXT);
+	$stmt->bindValue(':tnative', (int)($data['trunk_native'] ?? 1), SQLITE3_INTEGER);
+	$stmt->bindValue(':poe', !empty($data['poe_enabled']) ? 1 : 0, SQLITE3_INTEGER);
+	$stmt->bindValue(':speed', $data['speed'] ?? 'auto', SQLITE3_TEXT);
+	$stmt->bindValue(':duplex', $data['duplex'] ?? 'auto', SQLITE3_TEXT);
+	$stmt->bindValue(':enabled', !empty($data['enabled']) ? 1 : 0, SQLITE3_INTEGER);
+
+	$result = $stmt->execute();
+	$new_id = empty($data['id']) ? $db->lastInsertRowID() : (int)$data['id'];
+	$db->close();
+	return $result ? $new_id : false;
+}
+
+function switchmgmt_profile_delete($id) {
+	$db = switchmgmt_db_open();
+	if (!$db) return false;
+	// Enable foreign keys for CASCADE
+	$db->exec("PRAGMA foreign_keys = ON");
+	$stmt = $db->prepare("DELETE FROM profiles WHERE id = :id");
+	$stmt->bindValue(':id', (int)$id, SQLITE3_INTEGER);
+	$result = $stmt->execute();
+	$db->close();
+	return $result ? true : false;
+}
+
+function switchmgmt_profile_validate($data, &$errors) {
+	if (empty(trim($data['name'] ?? ''))) {
+		$errors[] = gettext('Profile name is required.');
+	}
+	if (!in_array($data['vlan_mode'] ?? '', ['access', 'trunk', 'hybrid'])) {
+		$errors[] = gettext('VLAN mode must be access, trunk, or hybrid.');
+	}
+	if ($data['vlan_mode'] == 'access' || $data['vlan_mode'] == 'hybrid') {
+		$vlan = (int)($data['access_vlan'] ?? 0);
+		if ($vlan < 1 || $vlan > 4094) {
+			$errors[] = gettext('Access VLAN must be between 1 and 4094.');
+		}
+	}
+	if ($data['vlan_mode'] == 'trunk' || $data['vlan_mode'] == 'hybrid') {
+		$native = (int)($data['trunk_native'] ?? 0);
+		if ($native < 1 || $native > 4094) {
+			$errors[] = gettext('Native VLAN must be between 1 and 4094.');
+		}
+		if (!empty($data['trunk_allowed'])) {
+			if (!preg_match('/^(\d+(-\d+)?)(,\d+(-\d+)?)*$/', trim($data['trunk_allowed']))) {
+				$errors[] = gettext('Trunk allowed VLANs must be comma-separated VLAN IDs or ranges (e.g. "10,20,100-200").');
+			}
+		}
+	}
+}
+
+/* ============================================================
+ * Port assignments
+ * ============================================================ */
+
+function switchmgmt_assignment_get_for_switch($switch_ip) {
+	$db = switchmgmt_db_open();
+	if (!$db) return array();
+	$stmt = $db->prepare("
+		SELECT pa.*, p.name AS profile_name
+		FROM port_assignments pa
+		LEFT JOIN profiles p ON pa.profile_id = p.id
+		WHERE pa.switch_ip = :ip
+	");
+	$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+	$res = $stmt->execute();
+	$results = array();
+	while ($row = $res->fetchArray(SQLITE3_ASSOC)) {
+		$results[$row['ifindex']] = $row;
+	}
+	$db->close();
+	return $results;
+}
+
+function switchmgmt_assignment_set($switch_ip, $ifindex, $profile_id) {
+	$db = switchmgmt_db_open();
+	if (!$db) return false;
+	if (empty($profile_id)) {
+		// If port was previously synced, mark for removal instead of deleting
+		$stmt = $db->prepare("SELECT sync_status FROM port_assignments WHERE switch_ip = :ip AND ifindex = :idx");
+		$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+		$stmt->bindValue(':idx', (int)$ifindex, SQLITE3_INTEGER);
+		$res = $stmt->execute();
+		$row = $res->fetchArray(SQLITE3_ASSOC);
+		if ($row && $row['sync_status'] == 'synced') {
+			// Mark for reset on next push
+			$stmt = $db->prepare("UPDATE port_assignments SET sync_status = 'removing' WHERE switch_ip = :ip AND ifindex = :idx");
+			$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+			$stmt->bindValue(':idx', (int)$ifindex, SQLITE3_INTEGER);
+		} else {
+			$stmt = $db->prepare("DELETE FROM port_assignments WHERE switch_ip = :ip AND ifindex = :idx");
+			$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+			$stmt->bindValue(':idx', (int)$ifindex, SQLITE3_INTEGER);
+		}
+	} else {
+		$stmt = $db->prepare("
+			INSERT INTO port_assignments (switch_ip, ifindex, profile_id, assigned_at, sync_status)
+			VALUES (:ip, :idx, :pid, :time, 'pending')
+			ON CONFLICT(switch_ip, ifindex) DO UPDATE SET
+				profile_id = :pid,
+				assigned_at = CASE WHEN profile_id != :pid THEN :time ELSE assigned_at END,
+				sync_status = CASE WHEN profile_id != :pid THEN 'pending' ELSE sync_status END
+		");
+		$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+		$stmt->bindValue(':idx', (int)$ifindex, SQLITE3_INTEGER);
+		$stmt->bindValue(':pid', (int)$profile_id, SQLITE3_INTEGER);
+		$stmt->bindValue(':time', time(), SQLITE3_INTEGER);
+	}
+	$result = $stmt->execute();
+	$db->close();
+	return $result ? true : false;
+}
+
+function switchmgmt_assignment_get_usage_count($profile_id) {
+	$db = switchmgmt_db_open();
+	if (!$db) return 0;
+	$stmt = $db->prepare("SELECT COUNT(*) AS cnt FROM port_assignments WHERE profile_id = :pid");
+	$stmt->bindValue(':pid', (int)$profile_id, SQLITE3_INTEGER);
+	$res = $stmt->execute();
+	$row = $res->fetchArray(SQLITE3_ASSOC);
+	$db->close();
+	return (int)($row['cnt'] ?? 0);
+}
+
+/* ============================================================
+ * Config preview (CLI command generation)
+ * ============================================================ */
+
+function switchmgmt_generate_cisco_ios($port, $profile) {
+	$lines = array();
+	// Use the raw ifdescr for Cisco (e.g. "GigabitEthernet0/1")
+	$portname = $port['ifdescr'] ?: "GigabitEthernet0/{$port['ifindex']}";
+	$lines[] = "interface {$portname}";
+
+	if (empty($profile['enabled'])) {
+		$lines[] = " shutdown";
+	} else {
+		$lines[] = " no shutdown";
+	}
+
+	if ($profile['vlan_mode'] == 'access') {
+		$lines[] = " switchport mode access";
+		$lines[] = " switchport access vlan {$profile['access_vlan']}";
+	} elseif ($profile['vlan_mode'] == 'trunk') {
+		$lines[] = " switchport mode trunk";
+		if (!empty($profile['trunk_allowed'])) {
+			$lines[] = " switchport trunk allowed vlan {$profile['trunk_allowed']}";
+		}
+		$lines[] = " switchport trunk native vlan {$profile['trunk_native']}";
+	} elseif ($profile['vlan_mode'] == 'hybrid') {
+		$lines[] = " switchport mode trunk";
+		$lines[] = " switchport trunk native vlan {$profile['access_vlan']}";
+		if (!empty($profile['trunk_allowed'])) {
+			$lines[] = " switchport trunk allowed vlan {$profile['trunk_allowed']}";
+		}
+	}
+
+	if ($profile['speed'] != 'auto') {
+		$lines[] = " speed {$profile['speed']}";
+	}
+	if ($profile['duplex'] != 'auto') {
+		$lines[] = " duplex {$profile['duplex']}";
+	}
+
+	if (!empty($profile['poe_enabled'])) {
+		$lines[] = " power inline auto";
+	}
+
+	$lines[] = "!";
+	return $lines;
+}
+
+function switchmgmt_generate_edgecore($port, $profile) {
+	$lines = array();
+	// Normalize to CLI format: "ethernet 1/1"
+	$portnum = switchmgmt_format_port_name($port['ifdescr'] ?: "1/{$port['ifindex']}");
+	$lines[] = "interface ethernet {$portnum}";
+
+	if (empty($profile['enabled'])) {
+		$lines[] = " shutdown";
+	} else {
+		$lines[] = " no shutdown";
+	}
+
+	$vlan = (int)($profile['access_vlan'] ?? 1);
+	$native = (int)($profile['trunk_native'] ?? 1);
+
+	if ($profile['vlan_mode'] == 'access') {
+		$lines[] = " switchport mode access";
+		$lines[] = " switchport native vlan {$vlan}";
+		$lines[] = " switchport allowed vlan add {$vlan} untagged";
+		if ($vlan != 1) {
+			$lines[] = " switchport allowed vlan remove 1";
+		}
+	} elseif ($profile['vlan_mode'] == 'trunk') {
+		$lines[] = " switchport mode trunk";
+		$lines[] = " switchport acceptable-frame-types tagged";
+		if (!empty($profile['trunk_allowed'])) {
+			$lines[] = " switchport allowed vlan add {$profile['trunk_allowed']} tagged";
+		}
+		$lines[] = " switchport allowed vlan remove 1";
+	} elseif ($profile['vlan_mode'] == 'hybrid') {
+		$lines[] = " switchport mode hybrid";
+		$lines[] = " switchport native vlan {$vlan}";
+		$lines[] = " switchport allowed vlan add {$vlan} untagged";
+		if (!empty($profile['trunk_allowed'])) {
+			$lines[] = " switchport allowed vlan add {$profile['trunk_allowed']} tagged";
+		}
+		if ($vlan != 1) {
+			$lines[] = " switchport allowed vlan remove 1";
+		}
+	}
+
+	if ($profile['speed'] != 'auto') {
+		$lines[] = " speed-duplex {$profile['speed']}-" . ($profile['duplex'] != 'auto' ? $profile['duplex'] : 'full');
+	}
+
+	$lines[] = "!";
+	return $lines;
+}
+
+function switchmgmt_generate_cisco_ios_reset($port) {
+	$portname = $port['ifdescr'] ?: "GigabitEthernet0/{$port['ifindex']}";
+	return array(
+		"interface {$portname}",
+		" no shutdown",
+		" switchport mode access",
+		" switchport access vlan 1",
+		" speed auto",
+		" duplex auto",
+		"!",
+	);
+}
+
+function switchmgmt_generate_edgecore_reset($port) {
+	$portnum = switchmgmt_format_port_name($port['ifdescr'] ?: "1/{$port['ifindex']}");
+	return array(
+		"interface ethernet {$portnum}",
+		" no shutdown",
+		" no switchport mode",
+		" switchport native vlan 1",
+		" no switchport allowed vlan",
+		" switchport allowed vlan add 1 untagged",
+		"!",
+	);
+}
+
+/**
+ * Get ports marked for removal (profile was unassigned after being synced).
+ */
+function switchmgmt_get_removing_ports($switch_ip) {
+	$db = switchmgmt_db_open();
+	if (!$db) return array();
+	$stmt = $db->prepare("
+		SELECT pa.ifindex, pt.ifdescr, pt.ifname
+		FROM port_assignments pa
+		LEFT JOIN ports pt ON pa.switch_ip = pt.switch_ip AND pa.ifindex = pt.ifindex
+		WHERE pa.switch_ip = :ip AND pa.sync_status = 'removing'
+	");
+	$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+	$res = $stmt->execute();
+	$results = array();
+	while ($row = $res->fetchArray(SQLITE3_ASSOC)) {
+		$results[] = $row;
+	}
+	$db->close();
+	return $results;
+}
+
+function switchmgmt_generate_config_preview($switch_ip) {
+	$db = switchmgmt_db_open();
+	if (!$db) return array();
+
+	$stmt = $db->prepare("SELECT * FROM switches WHERE ipaddr = :ip");
+	$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+	$res = $stmt->execute();
+	$sw_info = $res->fetchArray(SQLITE3_ASSOC);
+	if (!$sw_info) {
+		$db->close();
+		return array();
+	}
+
+	$vendor = switchmgmt_detect_vendor($sw_info);
+	$vendor_name = strtolower($vendor['name']);
+
+	// Get active profile assignments
+	$stmt = $db->prepare("
+		SELECT pa.ifindex, pa.sync_status, p.*,
+			pt.ifdescr, pt.ifname
+		FROM port_assignments pa
+		JOIN profiles p ON pa.profile_id = p.id
+		LEFT JOIN ports pt ON pa.switch_ip = pt.switch_ip AND pa.ifindex = pt.ifindex
+		WHERE pa.switch_ip = :ip AND pa.sync_status IN ('pending', 'failed')
+		ORDER BY pa.ifindex
+	");
+	$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+	$res = $stmt->execute();
+
+	$output = array();
+	while ($row = $res->fetchArray(SQLITE3_ASSOC)) {
+		$port = array('ifindex' => $row['ifindex'], 'ifdescr' => $row['ifdescr'], 'ifname' => $row['ifname']);
+		if ($vendor_name == 'edgecore') {
+			$lines = switchmgmt_generate_edgecore($port, $row);
+		} else {
+			$lines = switchmgmt_generate_cisco_ios($port, $row);
+		}
+		$output[] = array(
+			'ifindex' => $row['ifindex'],
+			'port_name' => $row['ifdescr'] ?: "Port {$row['ifindex']}",
+			'profile_name' => $row['name'],
+			'commands' => $lines,
+			'action' => 'apply',
+		);
+	}
+
+	// Get ports marked for removal (reset to defaults)
+	$stmt = $db->prepare("
+		SELECT pa.ifindex, pt.ifdescr, pt.ifname
+		FROM port_assignments pa
+		LEFT JOIN ports pt ON pa.switch_ip = pt.switch_ip AND pa.ifindex = pt.ifindex
+		WHERE pa.switch_ip = :ip AND pa.sync_status = 'removing'
+		ORDER BY pa.ifindex
+	");
+	$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+	$res = $stmt->execute();
+	while ($row = $res->fetchArray(SQLITE3_ASSOC)) {
+		$port = array('ifindex' => $row['ifindex'], 'ifdescr' => $row['ifdescr'], 'ifname' => $row['ifname']);
+		if ($vendor_name == 'edgecore') {
+			$lines = switchmgmt_generate_edgecore_reset($port);
+		} else {
+			$lines = switchmgmt_generate_cisco_ios_reset($port);
+		}
+		$output[] = array(
+			'ifindex' => $row['ifindex'],
+			'port_name' => $row['ifdescr'] ?: "Port {$row['ifindex']}",
+			'profile_name' => '** RESET TO DEFAULT **',
+			'commands' => $lines,
+			'action' => 'reset',
+		);
+	}
+
+	$db->close();
+	return array('vendor' => $vendor['name'], 'entries' => $output);
 }
 
 /* ============================================================
@@ -1235,7 +1665,24 @@ function switchmgmt_install() {
 		$db->close();
 	}
 
+	// Ensure php-ssh2 extension is loaded for config push
+	switchmgmt_ensure_ssh2_extension();
+
 	switchmgmt_log("Package installed");
+}
+
+function switchmgmt_ensure_ssh2_extension() {
+	$php_ini = '/usr/local/etc/php.ini';
+	if (!file_exists($php_ini)) {
+		return;
+	}
+	$contents = file_get_contents($php_ini);
+	if (strpos($contents, 'ssh2.so') === false) {
+		file_put_contents($php_ini, $contents . "\nextension=ssh2.so\n");
+		// Restart PHP-FPM to load the extension
+		exec('/etc/rc.php-fpm_restart');
+		switchmgmt_log("Added ssh2 extension to php.ini");
+	}
 }
 
 function switchmgmt_deinstall() {

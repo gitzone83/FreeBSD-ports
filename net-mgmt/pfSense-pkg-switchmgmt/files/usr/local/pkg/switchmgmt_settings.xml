@@ -2,7 +2,7 @@
 <packagegui>
 	<title>Services/Switch Management Settings</title>
 	<name>switchmgmt_settings</name>
-	<version>0.1.0</version>
+	<version>0.1.2</version>
 	<include_file>/usr/local/pkg/switchmgmt.inc</include_file>
 	<tabs>
 		<tab>

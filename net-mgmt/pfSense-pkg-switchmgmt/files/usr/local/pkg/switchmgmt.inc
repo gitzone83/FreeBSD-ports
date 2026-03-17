@@ -156,6 +156,15 @@ define('OID_ENTPHYSICALMODELNAME',   '.1.3.6.1.2.1.47.1.1.1.1.13');
 define('OID_ENTPHYSICALSOFTWAREREV', '.1.3.6.1.2.1.47.1.1.1.1.10');
 define('OID_ENTPHYSICALFIRMWAREREV', '.1.3.6.1.2.1.47.1.1.1.1.9');
 
+// LLDP-MIB (lldpRemTable, lldpLocPortTable)
+define('OID_LLDPREMSYSNAME',    '.1.0.8802.1.1.2.1.4.1.1.9');
+define('OID_LLDPREMPORTID',     '.1.0.8802.1.1.2.1.4.1.1.7');
+define('OID_LLDPREMPORTDESC',   '.1.0.8802.1.1.2.1.4.1.1.8');
+define('OID_LLDPREMCHASSISID',  '.1.0.8802.1.1.2.1.4.1.1.5');
+define('OID_LLDPREMSYSDESC',    '.1.0.8802.1.1.2.1.4.1.1.10');
+define('OID_LLDPREMMANADDR',    '.1.0.8802.1.1.2.1.4.2');
+define('OID_LLDPLOCPORTDESC',   '.1.0.8802.1.1.2.1.3.7.1.4');
+
 /* ============================================================
  * SNMP value normalization
  *
@@ -450,6 +459,19 @@ function switchmgmt_db_open() {
 			UNIQUE(switch_ip, ifindex)
 		);
 		CREATE INDEX IF NOT EXISTS idx_ports_switch ON ports (switch_ip);
+		CREATE TABLE IF NOT EXISTS neighbors (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			switch_ip TEXT NOT NULL,
+			local_port INTEGER NOT NULL,
+			remote_sysname TEXT,
+			remote_port TEXT,
+			remote_chassisid TEXT,
+			remote_mgmtaddr TEXT,
+			protocol TEXT DEFAULT 'lldp',
+			last_updated INTEGER,
+			UNIQUE(switch_ip, local_port, remote_chassisid)
+		);
+		CREATE INDEX IF NOT EXISTS idx_neighbors_switch ON neighbors (switch_ip);
 	");
 
 	return $db;
@@ -543,6 +565,169 @@ function switchmgmt_db_update_port($db, $switch_ip, $ifindex, $portdata) {
 	$stmt->bindValue(':outd', $portdata['out_discards'] ?? 0, SQLITE3_INTEGER);
 	$stmt->bindValue(':time', time(), SQLITE3_INTEGER);
 	$stmt->execute();
+}
+
+/* ============================================================
+ * LLDP neighbor discovery
+ * ============================================================ */
+
+/**
+ * Poll LLDP neighbors for a switch and store in the database.
+ * LLDP-MIB remote table is indexed as <timeMark>.<localPortNum>.<remIndex>.
+ * localPortNum is the LLDP port number, which may differ from ifIndex.
+ * We use lldpLocPortDesc to build a mapping from LLDP port -> ifdescr,
+ * then match to the ports table to resolve ifIndex.
+ */
+function switchmgmt_poll_lldp($db, $sw) {
+	$ip = $sw['ipaddr'];
+
+	// Walk LLDP remote system names
+	$raw_sysnames = switchmgmt_snmpwalk($sw, OID_LLDPREMSYSNAME);
+	if ($raw_sysnames === false || empty($raw_sysnames)) {
+		return;
+	}
+
+	// Build LLDP local port -> ifdescr mapping
+	$lldp_loc_desc = switchmgmt_walk_indexed($sw, OID_LLDPLOCPORTDESC) ?: array();
+
+	// Build ifdescr -> ifindex reverse map from the database
+	$descr_to_ifindex = array();
+	$res = $db->query("SELECT ifindex, ifdescr FROM ports WHERE switch_ip = '"
+		. $db->escapeString($ip) . "'");
+	while ($row = $res->fetchArray(SQLITE3_ASSOC)) {
+		$descr_to_ifindex[$row['ifdescr']] = (int)$row['ifindex'];
+	}
+
+	// Walk additional neighbor fields
+	$raw_portids  = switchmgmt_snmpwalk($sw, OID_LLDPREMPORTID) ?: array();
+	$raw_portdesc = switchmgmt_snmpwalk($sw, OID_LLDPREMPORTDESC) ?: array();
+	$raw_chassis  = switchmgmt_snmpwalk($sw, OID_LLDPREMCHASSISID) ?: array();
+
+	// Walk management addresses
+	$raw_mgmtaddr = switchmgmt_snmpwalk($sw, OID_LLDPREMMANADDR) ?: array();
+
+	// Build a map of management IPs keyed by "<localPort>.<remIndex>"
+	$mgmt_ips = array();
+	foreach ($raw_mgmtaddr as $full_oid => $val) {
+		// OID suffix: ...<timeMark>.<localPort>.<remIndex>.1.4.<ip1>.<ip2>.<ip3>.<ip4>
+		if (preg_match('/\.(\d+)\.(\d+)\.(\d+)\.1\.4\.(\d+\.\d+\.\d+\.\d+)$/', $full_oid, $m)) {
+			$key = $m[2] . '.' . $m[3];
+			$mgmt_ips[$key] = $m[4];
+		}
+	}
+
+	// Parse entries - extract localPort from the 3-part index
+	$neighbors = array();
+	foreach ($raw_sysnames as $full_oid => $sysname) {
+		$suffix = str_replace(OID_LLDPREMSYSNAME . '.', '', $full_oid);
+		$parts = explode('.', $suffix);
+		if (count($parts) < 3) {
+			continue;
+		}
+		$lldp_port = (int)$parts[1];
+		$rem_index = (int)$parts[2];
+		$key = $lldp_port . '.' . $rem_index;
+
+		// Map LLDP port to ifIndex via local port description
+		$ifindex = $lldp_port; // fallback: assume they match
+		if (isset($lldp_loc_desc[$lldp_port]) && isset($descr_to_ifindex[$lldp_loc_desc[$lldp_port]])) {
+			$ifindex = $descr_to_ifindex[$lldp_loc_desc[$lldp_port]];
+		}
+
+		// Get remote port - prefer port description over port ID (which may be a MAC)
+		$remote_port = '';
+		$portdesc_oid = OID_LLDPREMPORTDESC . '.' . $suffix;
+		$portid_oid = OID_LLDPREMPORTID . '.' . $suffix;
+		if (!empty($raw_portdesc[$portdesc_oid])) {
+			$remote_port = $raw_portdesc[$portdesc_oid];
+		} elseif (!empty($raw_portids[$portid_oid])) {
+			$remote_port = $raw_portids[$portid_oid];
+		}
+
+		$chassis_oid = OID_LLDPREMCHASSISID . '.' . $suffix;
+		$chassis = $raw_chassis[$chassis_oid] ?? '';
+
+		$neighbors[] = array(
+			'local_port'       => $ifindex,
+			'remote_sysname'   => trim($sysname),
+			'remote_port'      => trim($remote_port),
+			'remote_chassisid' => trim($chassis),
+			'remote_mgmtaddr'  => $mgmt_ips[$key] ?? '',
+		);
+	}
+
+	if (empty($neighbors)) {
+		return;
+	}
+
+	// Clear old neighbors for this switch and insert fresh data
+	$stmt = $db->prepare("DELETE FROM neighbors WHERE switch_ip = :ip");
+	$stmt->bindValue(':ip', $ip, SQLITE3_TEXT);
+	$stmt->execute();
+
+	$stmt = $db->prepare("
+		INSERT OR REPLACE INTO neighbors (switch_ip, local_port, remote_sysname, remote_port, remote_chassisid, remote_mgmtaddr, protocol, last_updated)
+		VALUES (:sw, :lp, :sysname, :rport, :chassis, :mgmt, 'lldp', :time)
+	");
+	foreach ($neighbors as $n) {
+		$stmt->bindValue(':sw', $ip, SQLITE3_TEXT);
+		$stmt->bindValue(':lp', $n['local_port'], SQLITE3_INTEGER);
+		$stmt->bindValue(':sysname', $n['remote_sysname'], SQLITE3_TEXT);
+		$stmt->bindValue(':rport', $n['remote_port'], SQLITE3_TEXT);
+		$stmt->bindValue(':chassis', $n['remote_chassisid'], SQLITE3_TEXT);
+		$stmt->bindValue(':mgmt', $n['remote_mgmtaddr'], SQLITE3_TEXT);
+		$stmt->bindValue(':time', time(), SQLITE3_INTEGER);
+		$stmt->execute();
+		$stmt->reset();
+	}
+
+	switchmgmt_log("LLDP: {$ip} has " . count($neighbors) . " neighbor(s)");
+}
+
+/**
+ * Get LLDP neighbors for a switch, indexed by local port number.
+ */
+function switchmgmt_get_neighbors($switch_ip) {
+	$db = switchmgmt_db_open();
+	if (!$db) {
+		return array();
+	}
+
+	$stmt = $db->prepare("SELECT * FROM neighbors WHERE switch_ip = :ip ORDER BY local_port");
+	$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
+	$res = $stmt->execute();
+
+	$results = array();
+	while ($row = $res->fetchArray(SQLITE3_ASSOC)) {
+		$results[$row['local_port']] = $row;
+	}
+	$db->close();
+	return $results;
+}
+
+/**
+ * Get all neighbor relationships across all switches.
+ */
+function switchmgmt_get_all_neighbors() {
+	$db = switchmgmt_db_open();
+	if (!$db) {
+		return array();
+	}
+
+	$res = $db->query("
+		SELECT n.*, p.ifdescr AS local_ifdescr, s.sysname, s.model
+		FROM neighbors n
+		LEFT JOIN ports p ON n.switch_ip = p.switch_ip AND n.local_port = p.ifindex
+		LEFT JOIN switches s ON n.switch_ip = s.ipaddr
+		ORDER BY n.switch_ip, n.local_port
+	");
+
+	$results = array();
+	while ($row = $res->fetchArray(SQLITE3_ASSOC)) {
+		$results[] = $row;
+	}
+	$db->close();
+	return $results;
 }
 
 /* ============================================================
@@ -794,6 +979,9 @@ function switchmgmt_poll_switch($sw) {
 		}
 		$stmt->execute();
 	}
+
+	// Poll LLDP neighbors
+	switchmgmt_poll_lldp($db, $sw);
 
 	$db->close();
 

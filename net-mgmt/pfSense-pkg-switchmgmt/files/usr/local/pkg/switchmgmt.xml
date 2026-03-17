@@ -26,6 +26,10 @@
 			<text>Switch Status</text>
 			<url>/status_switchmgmt.php</url>
 		</tab>
+		<tab>
+			<text>Neighbors</text>
+			<url>/neighbors_switchmgmt.php</url>
+		</tab>
 	</tabs>
 	<adddeleteeditpagefields>
 		<columnitem>

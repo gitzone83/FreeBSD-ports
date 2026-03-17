@@ -63,6 +63,7 @@ $tab_array = array();
 $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_settings.xml&id=0");
 $tab_array[] = array(gettext("Switches"), false, "/pkg.php?xml=switchmgmt.xml");
 $tab_array[] = array(gettext("Switch Status"), true, "/status_switchmgmt.php");
+$tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 
 $switch_list = switchmgmt_get_switch_status();
@@ -136,6 +137,7 @@ $switch_list = switchmgmt_get_switch_status();
 
 <?php if (!empty($selected_switch)):
 	$ports = switchmgmt_get_port_status($selected_switch);
+	$neighbors = switchmgmt_get_neighbors($selected_switch);
 	// Find the config description for this switch
 	$sw_desc = $selected_switch;
 	$switches_config = switchmgmt_get_switches();
@@ -164,6 +166,7 @@ $switch_list = switchmgmt_get_switch_status();
 						<th colspan="2" style="text-align:center"><?=gettext("Packets")?></th>
 						<th colspan="2" style="text-align:center"><?=gettext("Errors")?></th>
 						<th colspan="2" style="text-align:center"><?=gettext("Discards")?></th>
+						<th rowspan="2"><?=gettext("Neighbor")?></th>
 					</tr>
 					<tr>
 						<th><?=gettext("Capability")?></th>
@@ -183,7 +186,7 @@ $switch_list = switchmgmt_get_switch_status();
 				<tbody>
 <?php if (empty($ports)): ?>
 					<tr>
-						<td colspan="13"><?=gettext("No port data available for this switch.")?></td>
+						<td colspan="14"><?=gettext("No port data available for this switch.")?></td>
 					</tr>
 <?php else: ?>
 <?php foreach ($ports as $port):
@@ -229,6 +232,18 @@ $switch_list = switchmgmt_get_switch_status();
 <?php else: ?>
 							<?=number_format($port['out_discards'])?>
 <?php endif; ?>
+						</td>
+						<td>
+<?php
+	$nb = $neighbors[$port['ifindex']] ?? null;
+	if ($nb && (!empty($nb['remote_sysname']) || !empty($nb['remote_mgmtaddr']))) {
+		$nb_label = $nb['remote_sysname'] ?: $nb['remote_mgmtaddr'] ?: $nb['remote_chassisid'];
+		$nb_port = $nb['remote_port'] ? switchmgmt_format_port_name($nb['remote_port']) : '';
+		echo htmlspecialchars($nb_label . ($nb_port ? ':' . $nb_port : ''));
+	} else {
+		echo '-';
+	}
+?>
 						</td>
 					</tr>
 <?php endforeach; ?>

@@ -30,6 +30,7 @@ $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_s
 $tab_array[] = array(gettext("Switch Configuration"), false, "/pkg.php?xml=switchmgmt.xml");
 $tab_array[] = array(gettext("Switch Port Profiles"), false, "/profiles_switchmgmt.php");
 $tab_array[] = array(gettext("Switch & Port Status"), false, "/status_switchmgmt.php");
+$tab_array[] = array(gettext("Switch Port Charts"), false, "/charts_switchmgmt.php");
 $tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 

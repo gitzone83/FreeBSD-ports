@@ -41,9 +41,9 @@ include("head.inc");
 
 $tab_array = array();
 $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_settings.xml&id=0");
-$tab_array[] = array(gettext("Switches"), false, "/pkg.php?xml=switchmgmt.xml");
+$tab_array[] = array(gettext("Switch Configuration"), false, "/pkg.php?xml=switchmgmt.xml");
 $tab_array[] = array(gettext("Switch Port Profiles"), false, "/profiles_switchmgmt.php");
-$tab_array[] = array(gettext("Switch Status"), false, "/status_switchmgmt.php");
+$tab_array[] = array(gettext("Switch & Port Status"), false, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 
@@ -105,7 +105,7 @@ if ($push_result !== null):
 		<i class="fa-solid fa-arrow-left"></i> <?=gettext("Back to Preview")?>
 	</a>
 	<a href="status_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
-		<i class="fa-solid fa-list"></i> <?=gettext("Back to Switch Status")?>
+		<i class="fa-solid fa-list"></i> <?=gettext("Back to Switch & Port Status")?>
 	</a>
 </div>
 

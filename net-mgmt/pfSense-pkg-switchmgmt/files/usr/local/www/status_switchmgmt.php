@@ -69,9 +69,9 @@ if ($savemsg) {
 /* Tabs */
 $tab_array = array();
 $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_settings.xml&id=0");
-$tab_array[] = array(gettext("Switches"), false, "/pkg.php?xml=switchmgmt.xml");
+$tab_array[] = array(gettext("Switch Configuration"), false, "/pkg.php?xml=switchmgmt.xml");
 $tab_array[] = array(gettext("Switch Port Profiles"), false, "/profiles_switchmgmt.php");
-$tab_array[] = array(gettext("Switch Status"), true, "/status_switchmgmt.php");
+$tab_array[] = array(gettext("Switch & Port Status"), true, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 
@@ -94,6 +94,7 @@ $switch_list = switchmgmt_get_switch_status();
 						<th><?=gettext("Version")?></th>
 						<th><?=gettext("Uptime")?></th>
 						<th><?=gettext("Status")?></th>
+						<th><?=gettext("SSH")?></th>
 						<th><?=gettext("Last Polled")?></th>
 						<th><?=gettext("Actions")?></th>
 					</tr>
@@ -101,9 +102,16 @@ $switch_list = switchmgmt_get_switch_status();
 				<tbody>
 <?php if (empty($switch_list)): ?>
 					<tr>
-						<td colspan="8"><?=gettext("No switches have been polled yet. Add switches and enable polling in Settings.")?></td>
+						<td colspan="9"><?=gettext("No switches have been polled yet. Add switches and enable polling in Settings.")?></td>
 					</tr>
 <?php else: ?>
+<?php
+$sw_configs = switchmgmt_get_switches();
+$ssh_map = array();
+foreach ($sw_configs as $sc) {
+	$ssh_map[$sc['ipaddr']] = !empty($sc['ssh_username']) && !empty($sc['ssh_password']);
+}
+?>
 <?php foreach ($switch_list as $sw): ?>
 					<tr>
 						<td>
@@ -120,6 +128,13 @@ $switch_list = switchmgmt_get_switch_status();
 							<span class="label label-danger"><?=gettext("Unreachable")?></span>
 <?php else: ?>
 							<span class="label label-default"><?=gettext("Unknown")?></span>
+<?php endif; ?>
+						</td>
+						<td>
+<?php if ($ssh_map[$sw['ipaddr']] ?? false): ?>
+							<span class="label label-success"><?=gettext("Yes")?></span>
+<?php else: ?>
+							<span class="label label-default"><?=gettext("No")?></span>
 <?php endif; ?>
 						</td>
 						<td><?=$sw['last_polled'] ? date('Y-m-d H:i:s', $sw['last_polled']) : '-'?></td>

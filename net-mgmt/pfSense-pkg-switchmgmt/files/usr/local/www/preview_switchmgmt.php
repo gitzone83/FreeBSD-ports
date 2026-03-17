@@ -27,14 +27,14 @@ include("head.inc");
 /* Tabs */
 $tab_array = array();
 $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_settings.xml&id=0");
-$tab_array[] = array(gettext("Switches"), false, "/pkg.php?xml=switchmgmt.xml");
+$tab_array[] = array(gettext("Switch Configuration"), false, "/pkg.php?xml=switchmgmt.xml");
 $tab_array[] = array(gettext("Switch Port Profiles"), false, "/profiles_switchmgmt.php");
-$tab_array[] = array(gettext("Switch Status"), false, "/status_switchmgmt.php");
+$tab_array[] = array(gettext("Switch & Port Status"), false, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 
 if (empty($selected_switch)) {
-	print_info_box(gettext("No switch selected. Go to Switch Status and click Preview Config."), 'warning');
+	print_info_box(gettext("No switch selected. Go to Switch & Port Status and click Preview Config."), 'warning');
 	include("foot.inc");
 	exit;
 }
@@ -82,7 +82,7 @@ foreach ($total_assignments as $a) {
 		</div>
 		<a class="btn btn-default btn-sm" href="status_switchmgmt.php?switch=<?=urlencode($selected_switch)?>">
 			<i class="fa-solid fa-arrow-left icon-embed-btn"></i>
-			<?=gettext("Back to Switch Status")?>
+			<?=gettext("Back to Switch & Port Status")?>
 		</a>
 <?php else: ?>
 		<pre id="config-output" class="pre-scrollable" style="max-height:600px;"><?php
@@ -100,7 +100,7 @@ foreach ($total_assignments as $a) {
 				<i class="fa-solid fa-copy"></i> <?=gettext("Copy to Clipboard")?>
 			</a>
 			<a href="status_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
-				<i class="fa-solid fa-arrow-left"></i> <?=gettext("Back to Switch Status")?>
+				<i class="fa-solid fa-arrow-left"></i> <?=gettext("Back to Switch & Port Status")?>
 			</a>
 <?php if ($has_ssh_creds): ?>
 			<a href="push_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#d9534f;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">

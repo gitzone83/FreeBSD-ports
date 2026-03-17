@@ -18,7 +18,7 @@
 			<url>/pkg_edit.php?xml=switchmgmt_settings.xml&amp;id=0</url>
 		</tab>
 		<tab>
-			<text>Switches</text>
+			<text>Switch Configuration</text>
 			<url>/pkg.php?xml=switchmgmt.xml</url>
 			<active/>
 		</tab>
@@ -27,7 +27,7 @@
 			<url>/profiles_switchmgmt.php</url>
 		</tab>
 		<tab>
-			<text>Switch Status</text>
+			<text>Switch &amp; Port Status</text>
 			<url>/status_switchmgmt.php</url>
 		</tab>
 		<tab>

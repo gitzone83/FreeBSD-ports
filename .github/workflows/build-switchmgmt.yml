@@ -21,8 +21,21 @@ jobs:
             net-mgmt/pfSense-pkg-switchmgmt
           sparse-checkout-cone-mode: false
 
+      - name: Extract version from tag or XML
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION=$(grep -o '<version>[^<]*</version>' net-mgmt/pfSense-pkg-switchmgmt/files/usr/local/pkg/switchmgmt.xml | head -1 | sed 's/<[^>]*>//g')
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Detected version: ${VERSION}"
+
       - name: Build package on FreeBSD
         uses: vmactions/freebsd-vm@v1
+        env:
+          PKG_VERSION: ${{ steps.version.outputs.version }}
         with:
           release: "14.1"
           usesh: true
@@ -30,78 +43,79 @@ jobs:
             set -e
 
             PKG_NAME="pfSense-pkg-switchmgmt"
-            PKG_VERSION="0.1.1"
             PORT_DIR="net-mgmt/${PKG_NAME}"
             STAGEDIR="/tmp/stage"
             METADIR="/tmp/meta"
             PREFIX="/usr/local"
             DATADIR="${PREFIX}/share/${PKG_NAME}"
 
+            echo "==> Building version ${PKG_VERSION}"
             echo "==> Staging files"
             mkdir -p "${STAGEDIR}${PREFIX}/pkg"
             mkdir -p "${STAGEDIR}${PREFIX}/www"
             mkdir -p "${STAGEDIR}${DATADIR}"
             mkdir -p "${STAGEDIR}/etc/inc/priv"
 
+            # Privilege file
             cp "${PORT_DIR}/files/etc/inc/priv/switchmgmt.priv.inc" \
                "${STAGEDIR}/etc/inc/priv/"
-            cp "${PORT_DIR}/files${PREFIX}/pkg/switchmgmt.xml" \
-               "${STAGEDIR}${PREFIX}/pkg/"
-            cp "${PORT_DIR}/files${PREFIX}/pkg/switchmgmt_settings.xml" \
-               "${STAGEDIR}${PREFIX}/pkg/"
-            cp "${PORT_DIR}/files${PREFIX}/pkg/switchmgmt.inc" \
-               "${STAGEDIR}${PREFIX}/pkg/"
-            cp "${PORT_DIR}/files${PREFIX}/pkg/switchmgmt_poll.php" \
-               "${STAGEDIR}${PREFIX}/pkg/"
-            cp "${PORT_DIR}/files${PREFIX}/www/status_switchmgmt.php" \
-               "${STAGEDIR}${PREFIX}/www/"
-            cp "${PORT_DIR}/files${DATADIR}/info.xml" \
-               "${STAGEDIR}${DATADIR}/"
 
-            sed -i '' "s|%%PKGVERSION%%|${PKG_VERSION}|g" \
-               "${STAGEDIR}${DATADIR}/info.xml"
+            # Package config files
+            for f in switchmgmt.xml switchmgmt_settings.xml switchmgmt.inc switchmgmt_ssh.inc switchmgmt_poll.php; do
+              if [ -f "${PORT_DIR}/files${PREFIX}/pkg/${f}" ]; then
+                cp "${PORT_DIR}/files${PREFIX}/pkg/${f}" "${STAGEDIR}${PREFIX}/pkg/"
+              fi
+            done
+
+            # Web files
+            for f in ${PORT_DIR}/files${PREFIX}/www/*.php; do
+              if [ -f "$f" ]; then
+                cp "$f" "${STAGEDIR}${PREFIX}/www/"
+              fi
+            done
+
+            # Data files
+            if [ -f "${PORT_DIR}/files${DATADIR}/info.xml" ]; then
+              cp "${PORT_DIR}/files${DATADIR}/info.xml" "${STAGEDIR}${DATADIR}/"
+              sed -i '' "s|%%PKGVERSION%%|${PKG_VERSION}|g" "${STAGEDIR}${DATADIR}/info.xml"
+            fi
 
             echo "==> Creating package manifest (UCL format)"
             mkdir -p "${METADIR}"
-            cat > "${METADIR}/+MANIFEST" <<'ENDMANIFEST'
-            name: "pfSense-pkg-switchmgmt"
-            version: "0.1.0"
-            origin: "net-mgmt/pfSense-pkg-switchmgmt"
-            comment: "pfSense Switch Management package"
-            maintainer: "coreteam@pfsense.org"
-            www: "https://www.pfsense.org"
-            prefix: "/"
-            desc: "SNMP-based switch monitoring for pfSense. Polls network switches for per-port traffic counters, error counts, and discards."
-            categories: ["net-mgmt"]
-            deps: {
-              "net-snmp": {
-                origin: "net-mgmt/net-snmp",
-                version: "5.0"
-              }
-            }
-            ENDMANIFEST
-            sed -i '' 's/^            //' "${METADIR}/+MANIFEST"
+            cat > "${METADIR}/+MANIFEST" <<ENDMANIFEST
+name: "${PKG_NAME}"
+version: "${PKG_VERSION}"
+origin: "net-mgmt/${PKG_NAME}"
+comment: "pfSense Switch Management package"
+maintainer: "coreteam@pfsense.org"
+www: "https://www.pfsense.org"
+prefix: "/"
+desc: "Switch management for pfSense. SNMP monitoring, LLDP neighbor discovery, port profiles, SSH config push, drift detection, and RRD charting."
+categories: ["net-mgmt"]
+deps: {
+  "net-snmp": {
+    origin: "net-mgmt/net-snmp",
+    version: "5.0"
+  }
+}
+ENDMANIFEST
 
             echo "==> Creating install/deinstall scripts"
             cat > "${METADIR}/+POST_INSTALL" <<'ENDSCRIPT'
-            #!/bin/sh
-            /usr/local/bin/php -f /etc/rc.packages pfSense-pkg-switchmgmt POST-INSTALL
-            ENDSCRIPT
-            sed -i '' 's/^            //' "${METADIR}/+POST_INSTALL"
+#!/bin/sh
+/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-switchmgmt POST-INSTALL
+ENDSCRIPT
             chmod +x "${METADIR}/+POST_INSTALL"
 
             cat > "${METADIR}/+PRE_DEINSTALL" <<'ENDSCRIPT'
-            #!/bin/sh
-            /usr/local/bin/php -f /etc/rc.packages pfSense-pkg-switchmgmt DEINSTALL
-            ENDSCRIPT
-            sed -i '' 's/^            //' "${METADIR}/+PRE_DEINSTALL"
+#!/bin/sh
+/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-switchmgmt DEINSTALL
+ENDSCRIPT
             chmod +x "${METADIR}/+PRE_DEINSTALL"
 
             echo "==> Generating plist"
             (cd "${STAGEDIR}" && find . -type f | sed 's|^\./||' | sort) > "${METADIR}/plist"
 
-            echo "==> Contents of +MANIFEST:"
-            cat "${METADIR}/+MANIFEST"
             echo "==> Contents of plist:"
             cat "${METADIR}/plist"
 
@@ -112,7 +126,7 @@ jobs:
             echo "==> Package built:"
             ls -la /tmp/pkg-output/
 
-            # Copy to workspace so the upload step (on the host) can find it
+            # Copy to workspace for upload
             cp /tmp/pkg-output/*.pkg "${GITHUB_WORKSPACE}/${PKG_NAME}-${PKG_VERSION}.pkg"
 
       - name: Upload artifact
@@ -125,4 +139,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: /tmp/pfSense-pkg-switchmgmt-*.pkg
+          files: pfSense-pkg-switchmgmt-*.pkg

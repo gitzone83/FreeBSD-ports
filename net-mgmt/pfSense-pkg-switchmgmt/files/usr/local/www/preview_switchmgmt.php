@@ -28,8 +28,8 @@ include("head.inc");
 $tab_array = array();
 $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_settings.xml&id=0");
 $tab_array[] = array(gettext("Switches"), false, "/pkg.php?xml=switchmgmt.xml");
-$tab_array[] = array(gettext("Switch Status"), false, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Switch Port Profiles"), false, "/profiles_switchmgmt.php");
+$tab_array[] = array(gettext("Switch Status"), false, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 
@@ -95,26 +95,24 @@ foreach ($total_assignments as $a) {
 				echo "\n";
 			}
 		?></pre>
-		<button class="btn btn-default btn-sm" onclick="var t=document.getElementById('config-output');var r=document.createRange();r.selectNodeContents(t);var s=window.getSelection();s.removeAllRanges();s.addRange(r);document.execCommand('copy');s.removeAllRanges();">
-			<i class="fa-solid fa-copy icon-embed-btn"></i>
-			<?=gettext("Copy to Clipboard")?>
-		</button>
-		<a class="btn btn-default btn-sm" href="status_switchmgmt.php?switch=<?=urlencode($selected_switch)?>">
-			<i class="fa-solid fa-arrow-left icon-embed-btn"></i>
-			<?=gettext("Back to Switch Status")?>
-		</a>
+		<div style="margin:15px 15px;">
+			<a href="#" onclick="var t=document.getElementById('config-output');var r=document.createRange();r.selectNodeContents(t);var s=window.getSelection();s.removeAllRanges();s.addRange(r);document.execCommand('copy');s.removeAllRanges();return false;" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+				<i class="fa-solid fa-copy"></i> <?=gettext("Copy to Clipboard")?>
+			</a>
+			<a href="status_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+				<i class="fa-solid fa-arrow-left"></i> <?=gettext("Back to Switch Status")?>
+			</a>
+<?php if ($has_ssh_creds): ?>
+			<a href="push_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#d9534f;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+				<i class="fa-solid fa-upload"></i> <?=gettext("Push Config to Switch")?>
+			</a>
+<?php endif; ?>
+		</div>
 <?php endif; ?>
 	</div>
 </div>
 
-<?php if (!empty($preview['entries'])): ?>
-<?php if ($has_ssh_creds): ?>
-<div style="margin-top:10px;">
-	<a href="push_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#d9534f;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
-		<i class="fa-solid fa-upload"></i> <?=gettext("Push Config to Switch")?>
-	</a>
-</div>
-<?php else: ?>
+<?php if (!empty($preview['entries']) && !$has_ssh_creds): ?>
 <div class="alert alert-warning" style="margin-top:10px;">
 	<i class="fa-solid fa-exclamation-triangle"></i>
 	<?=sprintf(
@@ -123,7 +121,6 @@ foreach ($total_assignments as $a) {
 		'</a>'
 	)?>
 </div>
-<?php endif; ?>
 <?php endif; ?>
 
 <?php

@@ -75,8 +75,8 @@ include("head.inc");
 $tab_array = array();
 $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_settings.xml&id=0");
 $tab_array[] = array(gettext("Switches"), false, "/pkg.php?xml=switchmgmt.xml");
-$tab_array[] = array(gettext("Switch Status"), false, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Switch Port Profiles"), true, "/profiles_switchmgmt.php");
+$tab_array[] = array(gettext("Switch Status"), false, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 

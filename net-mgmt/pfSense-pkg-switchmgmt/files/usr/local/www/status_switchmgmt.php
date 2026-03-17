@@ -70,8 +70,8 @@ if ($savemsg) {
 $tab_array = array();
 $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_settings.xml&id=0");
 $tab_array[] = array(gettext("Switches"), false, "/pkg.php?xml=switchmgmt.xml");
-$tab_array[] = array(gettext("Switch Status"), true, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Switch Port Profiles"), false, "/profiles_switchmgmt.php");
+$tab_array[] = array(gettext("Switch Status"), true, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 
@@ -281,7 +281,7 @@ $switch_list = switchmgmt_get_switch_status();
 				</tbody>
 			</table>
 		</div>
-		<div style="margin-top:8px; margin-bottom:8px; text-align:right;">
+		<div style="margin:8px 15px; text-align:right;">
 			<label style="margin-right:4px;"><?=gettext("Apply to all ports:")?></label>
 			<select id="bulk_profile" class="form-control input-sm" style="width:auto;display:inline-block;height:24px;padding:1px 4px;font-size:12px;">
 				<option value="">--</option>
@@ -289,24 +289,21 @@ $switch_list = switchmgmt_get_switch_status();
 				<option value="<?=$p['id']?>"><?=htmlspecialchars($p['name'])?></option>
 <?php endforeach; ?>
 			</select>
-			<button type="button" class="btn btn-default btn-xs" onclick="$('select[name^=profile]').val($('#bulk_profile').val());">
-				<i class="fa-solid fa-check icon-embed-btn"></i><?=gettext("Apply")?>
-			</button>
-		</div>
-		<nav class="action-buttons">
-			<button class="btn btn-primary btn-sm" type="submit" name="assign_profile" value="1">
-				<i class="fa-solid fa-save icon-embed-btn"></i>
-				<?=gettext("Save Assignments")?>
-			</button>
-			<button type="button" class="btn btn-default btn-sm" onclick="window.location.reload();">
-				<i class="fa-solid fa-undo icon-embed-btn"></i>
-				<?=gettext("Reset Assignments")?>
-			</button>
-			<a class="btn btn-info btn-sm" href="preview_switchmgmt.php?switch=<?=urlencode($selected_switch)?>">
-				<i class="fa-solid fa-eye icon-embed-btn"></i>
-				<?=gettext("Preview Config")?>
+			<a href="#" onclick="$('select[name^=profile]').val($('#bulk_profile').val());return false;" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+				<i class="fa-solid fa-check"></i> <?=gettext("Apply")?>
 			</a>
-		</nav>
+		</div>
+		<div style="margin:15px 15px; text-align:right;">
+			<button type="submit" name="assign_profile" value="1" style="display:inline-block;padding:6px 12px;background:#5cb85c;color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">
+				<i class="fa-solid fa-save"></i> <?=gettext("Save Assignments")?>
+			</button>
+			<a href="#" onclick="window.location.reload();return false;" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+				<i class="fa-solid fa-undo"></i> <?=gettext("Reset Assignments")?>
+			</a>
+			<a href="preview_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+				<i class="fa-solid fa-eye"></i> <?=gettext("Preview Config")?>
+			</a>
+		</div>
 		</form>
 	</div>
 </div>

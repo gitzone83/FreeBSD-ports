@@ -15,12 +15,12 @@
 			<url>/pkg.php?xml=switchmgmt.xml</url>
 		</tab>
 		<tab>
-			<text>Switch Status</text>
-			<url>/status_switchmgmt.php</url>
-		</tab>
-		<tab>
 			<text>Switch Port Profiles</text>
 			<url>/profiles_switchmgmt.php</url>
+		</tab>
+		<tab>
+			<text>Switch Status</text>
+			<url>/status_switchmgmt.php</url>
 		</tab>
 		<tab>
 			<text>Neighbors</text>

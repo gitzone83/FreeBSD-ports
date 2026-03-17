@@ -42,8 +42,8 @@ include("head.inc");
 $tab_array = array();
 $tab_array[] = array(gettext("Settings"), false, "/pkg_edit.php?xml=switchmgmt_settings.xml&id=0");
 $tab_array[] = array(gettext("Switches"), false, "/pkg.php?xml=switchmgmt.xml");
-$tab_array[] = array(gettext("Switch Status"), false, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Switch Port Profiles"), false, "/profiles_switchmgmt.php");
+$tab_array[] = array(gettext("Switch Status"), false, "/status_switchmgmt.php");
 $tab_array[] = array(gettext("Neighbors"), false, "/neighbors_switchmgmt.php");
 display_top_tabs($tab_array);
 
@@ -100,12 +100,14 @@ if ($push_result !== null):
 </div>
 <?php endif; ?>
 
-<a class="btn btn-default btn-sm" href="preview_switchmgmt.php?switch=<?=urlencode($selected_switch)?>">
-	<?=gettext("Back to Preview")?>
-</a>
-<a class="btn btn-default btn-sm" href="status_switchmgmt.php?switch=<?=urlencode($selected_switch)?>">
-	<?=gettext("Back to Switch Status")?>
-</a>
+<div style="margin:15px 0;">
+	<a href="preview_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+		<i class="fa-solid fa-arrow-left"></i> <?=gettext("Back to Preview")?>
+	</a>
+	<a href="status_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+		<i class="fa-solid fa-list"></i> <?=gettext("Back to Switch Status")?>
+	</a>
+</div>
 
 <?php else: ?>
 
@@ -116,12 +118,14 @@ if ($push_result !== null):
 	<div class="panel-body">
 		<p><?=sprintf(gettext("You are about to push the assigned port profile configuration to %s. This will modify the switch's running configuration."), '<strong>' . htmlspecialchars($sw_desc) . '</strong>')?></p>
 		<p><?=gettext("Are you sure you want to proceed?")?></p>
-		<a href="push_switchmgmt.php?switch=<?=urlencode($selected_switch)?>&confirmed=1" style="display:inline-block;padding:8px 16px;background:#d9534f;color:#fff;border-radius:4px;text-decoration:none;">
-			<i class="fa-solid fa-upload"></i> <?=gettext("Yes, Push Config Now")?>
-		</a>
-		<a href="preview_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:8px 16px;background:#ddd;color:#333;border-radius:4px;text-decoration:none;">
-			<?=gettext("Cancel")?>
-		</a>
+		<div style="margin:15px;">
+			<a href="push_switchmgmt.php?switch=<?=urlencode($selected_switch)?>&confirmed=1" style="display:inline-block;padding:6px 12px;background:#d9534f;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+				<i class="fa-solid fa-upload"></i> <?=gettext("Yes, Push Config Now")?>
+			</a>
+			<a href="preview_switchmgmt.php?switch=<?=urlencode($selected_switch)?>" style="display:inline-block;padding:6px 12px;background:#5bc0de;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;">
+				<i class="fa-solid fa-arrow-left"></i> <?=gettext("Cancel")?>
+			</a>
+		</div>
 	</div>
 </div>
 

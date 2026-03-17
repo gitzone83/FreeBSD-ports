@@ -48,7 +48,7 @@ foreach ($all_switches as $sw) {
 	</div>
 	<div class="panel-body">
 		<div id="topology" style="width:100%; height:500px; border:1px solid #ddd;"></div>
-		<div style="margin-top:10px;">
+		<div style="margin:15px 15px;">
 			<span style="display:inline-block; width:14px; height:14px; background:#5cb85c; border:2px solid #4cae4c; vertical-align:middle; margin-right:4px;"></span> <?=gettext("Managed Switch")?>
 			&nbsp;&nbsp;
 			<span style="display:inline-block; width:14px; height:14px; background:#5bc0de; border:2px solid #46b8da; border-radius:50%; vertical-align:middle; margin-right:4px;"></span> <?=gettext("External Neighbor")?>

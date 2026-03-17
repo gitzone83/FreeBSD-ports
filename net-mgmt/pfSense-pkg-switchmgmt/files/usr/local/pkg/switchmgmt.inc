@@ -151,6 +151,10 @@ define('OID_IFHIGHSPEED',    '.1.3.6.1.2.1.31.1.1.1.15');
 define('OID_IFALIAS',        '.1.3.6.1.2.1.31.1.1.1.18');
 define('OID_IFNAME',         '.1.3.6.1.2.1.31.1.1.1.1');
 
+// Q-BRIDGE-MIB / CISCO-VLAN-MEMBERSHIP-MIB (VLAN state for drift detection)
+define('OID_DOT1QPVID',   '.1.3.6.1.2.1.17.7.1.4.5.1.1');
+define('OID_CISCO_VMVLAN', '.1.3.6.1.4.1.9.9.68.1.2.2.1.2');
+
 // ENTITY-MIB (entPhysicalTable)
 define('OID_ENTPHYSICALMODELNAME',   '.1.3.6.1.2.1.47.1.1.1.1.13');
 define('OID_ENTPHYSICALSOFTWAREREV', '.1.3.6.1.2.1.47.1.1.1.1.10');
@@ -195,6 +199,7 @@ $GLOBALS['switchmgmt_snmp_enum_maps'] = array(
 		'rs232'            => 33,
 		'propVirtual'      => 53,
 		'tunnel'           => 131,
+		'l2vlan'           => 135,
 		'l3ipvlan'         => 136,
 		'ieee8023adLag'    => 161,
 	),
@@ -251,6 +256,7 @@ function switchmgmt_get_vendor_filters() {
 			'exclude_types' => array(
 				33,  // rs232 (console port)
 				24,  // softwareLoopback
+				135, // l2vlan (VLAN interfaces)
 				136, // l3ipvlan (VLAN interfaces)
 			),
 			'port_capabilities' => array(
@@ -1107,7 +1113,7 @@ function switchmgmt_generate_config_preview($switch_ip) {
 		FROM port_assignments pa
 		JOIN profiles p ON pa.profile_id = p.id
 		LEFT JOIN ports pt ON pa.switch_ip = pt.switch_ip AND pa.ifindex = pt.ifindex
-		WHERE pa.switch_ip = :ip AND pa.sync_status IN ('pending', 'failed')
+		WHERE pa.switch_ip = :ip AND pa.sync_status IN ('pending', 'failed', 'drift')
 		ORDER BY pa.ifindex
 	");
 	$stmt->bindValue(':ip', $switch_ip, SQLITE3_TEXT);
@@ -1158,6 +1164,109 @@ function switchmgmt_generate_config_preview($switch_ip) {
 
 	$db->close();
 	return array('vendor' => $vendor['name'], 'entries' => $output);
+}
+
+/* ============================================================
+ * Config drift detection
+ * ============================================================ */
+
+/**
+ * Read the current VLAN state from a switch via SNMP and compare
+ * to the assigned profiles. Updates sync_status to 'drift' for
+ * ports where actual config differs from desired state.
+ *
+ * Called during each SNMP poll cycle for switches with assignments.
+ */
+function switchmgmt_check_drift($sw, $vendor) {
+	$ip = $sw['ipaddr'];
+	$vendor_name = strtolower($vendor['name']);
+
+	$db = switchmgmt_db_open();
+	if (!$db) return;
+
+	// Get all synced assignments for this switch
+	$stmt = $db->prepare("
+		SELECT pa.ifindex, pa.sync_status, p.vlan_mode, p.access_vlan, p.trunk_native
+		FROM port_assignments pa
+		JOIN profiles p ON pa.profile_id = p.id
+		WHERE pa.switch_ip = :ip AND pa.sync_status = 'synced'
+	");
+	$stmt->bindValue(':ip', $ip, SQLITE3_TEXT);
+	$res = $stmt->execute();
+
+	$assignments = array();
+	while ($row = $res->fetchArray(SQLITE3_ASSOC)) {
+		$assignments[$row['ifindex']] = $row;
+	}
+
+	if (empty($assignments)) {
+		$db->close();
+		return;
+	}
+
+	// Read current VLAN state from switch via SNMP
+	$actual_vlans = array();
+	if ($vendor_name == 'cisco') {
+		// Cisco: vmVlan indexed by ifIndex
+		$raw = switchmgmt_snmpwalk($sw, OID_CISCO_VMVLAN);
+		if (is_array($raw)) {
+			foreach ($raw as $oid => $val) {
+				$ifindex = (int)str_replace(OID_CISCO_VMVLAN . '.', '', $oid);
+				$actual_vlans[$ifindex] = (int)$val;
+			}
+		}
+	} else {
+		// Q-BRIDGE-MIB: dot1qPvid indexed by port number
+		$raw = switchmgmt_snmpwalk($sw, OID_DOT1QPVID);
+		if (is_array($raw)) {
+			foreach ($raw as $oid => $val) {
+				$port = (int)str_replace(OID_DOT1QPVID . '.', '', $oid);
+				$actual_vlans[$port] = (int)$val;
+			}
+		}
+	}
+
+	if (empty($actual_vlans)) {
+		$db->close();
+		return;
+	}
+
+	// Compare actual vs desired for each synced assignment
+	$drift_count = 0;
+	foreach ($assignments as $ifindex => $assign) {
+		$actual = $actual_vlans[$ifindex] ?? null;
+		if ($actual === null) {
+			continue; // Port not found in SNMP data
+		}
+
+		$drifted = false;
+		if ($assign['vlan_mode'] == 'access' || $assign['vlan_mode'] == 'hybrid') {
+			if ($actual != (int)$assign['access_vlan']) {
+				$drifted = true;
+			}
+		} elseif ($assign['vlan_mode'] == 'trunk') {
+			// For trunk, PVID should not be the access VLAN (it should be whatever native is)
+			// Trunk ports on EdgeCore have no native VLAN (PVID stays at whatever it was)
+			// Skip drift check for trunk mode PVID for now
+		}
+
+		if ($drifted) {
+			$stmt = $db->prepare("
+				UPDATE port_assignments SET sync_status = 'drift'
+				WHERE switch_ip = :ip AND ifindex = :idx AND sync_status = 'synced'
+			");
+			$stmt->bindValue(':ip', $ip, SQLITE3_TEXT);
+			$stmt->bindValue(':idx', (int)$ifindex, SQLITE3_INTEGER);
+			$stmt->execute();
+			$drift_count++;
+		}
+	}
+
+	$db->close();
+
+	if ($drift_count > 0) {
+		switchmgmt_log("Drift detected on {$ip}: {$drift_count} port(s) out of sync");
+	}
 }
 
 /* ============================================================
@@ -1414,6 +1523,9 @@ function switchmgmt_poll_switch($sw) {
 	switchmgmt_poll_lldp($db, $sw);
 
 	$db->close();
+
+	// Check for config drift on synced ports
+	switchmgmt_check_drift($sw, $vendor);
 
 	switchmgmt_log("Polled switch {$ip} ({$sysname}): " . count($monitor_indices) . " ports");
 	return true;

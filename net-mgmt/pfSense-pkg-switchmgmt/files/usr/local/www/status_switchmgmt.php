@@ -80,7 +80,8 @@ $switch_list = switchmgmt_get_switch_status();
 					<tr>
 						<th><?=gettext("IP Address")?></th>
 						<th><?=gettext("System Name")?></th>
-						<th><?=gettext("Description")?></th>
+						<th><?=gettext("Model")?></th>
+						<th><?=gettext("Version")?></th>
 						<th><?=gettext("Uptime")?></th>
 						<th><?=gettext("Status")?></th>
 						<th><?=gettext("Last Polled")?></th>
@@ -90,7 +91,7 @@ $switch_list = switchmgmt_get_switch_status();
 				<tbody>
 <?php if (empty($switch_list)): ?>
 					<tr>
-						<td colspan="7"><?=gettext("No switches have been polled yet. Add switches and enable polling in Settings.")?></td>
+						<td colspan="8"><?=gettext("No switches have been polled yet. Add switches and enable polling in Settings.")?></td>
 					</tr>
 <?php else: ?>
 <?php foreach ($switch_list as $sw): ?>
@@ -99,7 +100,8 @@ $switch_list = switchmgmt_get_switch_status();
 							<a href="?switch=<?=urlencode($sw['ipaddr'])?>"><?=htmlspecialchars($sw['ipaddr'])?></a>
 						</td>
 						<td><?=htmlspecialchars($sw['sysname'] ?? '-')?></td>
-						<td><?=htmlspecialchars(substr($sw['sysdescr'] ?? '-', 0, 80))?></td>
+						<td><?=htmlspecialchars($sw['model'] ?? $sw['sysdescr'] ?? '-')?></td>
+						<td><?=htmlspecialchars($sw['version'] ?? '-')?></td>
 						<td><?=htmlspecialchars($sw['sysuptime'] ?? '-')?></td>
 						<td>
 <?php if ($sw['poll_status'] == 'ok'): ?>
@@ -155,8 +157,7 @@ $switch_list = switchmgmt_get_switch_status();
 			<table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
 				<thead>
 					<tr>
-						<th><?=gettext("Description")?></th>
-						<th><?=gettext("Alias")?></th>
+						<th><?=gettext("Port")?></th>
 						<th><?=gettext("Capability")?></th>
 						<th><?=gettext("Speed")?></th>
 						<th><?=gettext("Admin")?></th>
@@ -174,7 +175,7 @@ $switch_list = switchmgmt_get_switch_status();
 				<tbody>
 <?php if (empty($ports)): ?>
 					<tr>
-						<td colspan="14"><?=gettext("No port data available for this switch.")?></td>
+						<td colspan="13"><?=gettext("No port data available for this switch.")?></td>
 					</tr>
 <?php else: ?>
 <?php foreach ($ports as $port):
@@ -185,7 +186,6 @@ $switch_list = switchmgmt_get_switch_status();
 ?>
 					<tr>
 						<td><?=htmlspecialchars($port['ifdescr'] ?: '-')?></td>
-						<td><?=htmlspecialchars($port['ifalias'] ?: '-')?></td>
 						<td><?=switchmgmt_format_speed($port['ifspeed'], $port['ifmaxspeed'] ?? $port['ifhighspeed'])?></td>
 						<td><?=($oper == 'up') ? switchmgmt_format_speed($port['ifspeed'], $port['ifhighspeed']) : '-'?></td>
 						<td><span class="label label-<?=$admin_class?>"><?=$admin?></span></td>

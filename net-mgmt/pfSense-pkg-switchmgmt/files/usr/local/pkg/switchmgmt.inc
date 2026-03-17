@@ -151,6 +151,11 @@ define('OID_IFHIGHSPEED',    '.1.3.6.1.2.1.31.1.1.1.15');
 define('OID_IFALIAS',        '.1.3.6.1.2.1.31.1.1.1.18');
 define('OID_IFNAME',         '.1.3.6.1.2.1.31.1.1.1.1');
 
+// ENTITY-MIB (entPhysicalTable)
+define('OID_ENTPHYSICALMODELNAME',   '.1.3.6.1.2.1.47.1.1.1.1.13');
+define('OID_ENTPHYSICALSOFTWAREREV', '.1.3.6.1.2.1.47.1.1.1.1.10');
+define('OID_ENTPHYSICALFIRMWAREREV', '.1.3.6.1.2.1.47.1.1.1.1.9');
+
 /* ============================================================
  * SNMP value normalization
  *
@@ -175,6 +180,7 @@ $GLOBALS['switchmgmt_snmp_enum_maps'] = array(
 		'lowerLayerDown' => 7,
 	),
 	'ifType' => array(
+		'other'            => 1,
 		'ethernetCsmacd'   => 6,
 		'softwareLoopback' => 24,
 		'rs232'            => 33,
@@ -238,16 +244,33 @@ function switchmgmt_get_vendor_filters() {
 				24,  // softwareLoopback
 				136, // l3ipvlan (VLAN interfaces)
 			),
-			// Port capability map per model.
-			// Keyed by sysDescr substring match -> array of port range definitions.
-			// ifHighSpeed reports transceiver speed, not port capability,
-			// so we need hardware knowledge for accurate max speed.
 			'port_capabilities' => array(
 				'ECS4155' => array(
 					array('start' => 1, 'end' => 24, 'maxspeed' => 2500),
 					array('start' => 25, 'end' => 30, 'maxspeed' => 25000),
 				),
 			),
+			// ENTITY-MIB: model at index 101, firmware at index 201
+			'model_source' => 'entity_mib',
+			'version_source' => 'entity_firmware',
+		),
+		'cisco' => array(
+			'name' => 'Cisco',
+			'match' => function($sysinfo) {
+				$oid = $sysinfo['sysobjectid'] ?? '';
+				$descr = $sysinfo['sysdescr'] ?? '';
+				return (strpos($oid, '.1.3.6.1.4.1.9.') === 0)
+					|| (stripos($descr, 'cisco') !== false);
+			},
+			'exclude_types' => array(
+				1,   // other (Null0)
+				24,  // softwareLoopback
+				53,  // propVirtual (VLAN interfaces)
+				131, // tunnel
+			),
+			// ENTITY-MIB: model and software version at index 1001
+			'model_source' => 'entity_mib',
+			'version_source' => 'entity_software',
 		),
 		'default' => array(
 			'name' => 'Generic',
@@ -302,6 +325,57 @@ function switchmgmt_get_port_capability($vendor, $sysinfo, $ifindex, $fallback_s
 	return (int)$fallback_speed;
 }
 
+/**
+ * Resolve model and version for a switch using ENTITY-MIB.
+ * Walks entPhysicalModelName/SoftwareRev/FirmwareRev and picks
+ * the first non-empty value.
+ */
+function switchmgmt_resolve_model_version($sw, $vendor) {
+	$result = array('model' => '', 'version' => '');
+
+	$model_source = $vendor['model_source'] ?? '';
+	$version_source = $vendor['version_source'] ?? '';
+
+	if ($model_source === 'entity_mib') {
+		$models = switchmgmt_snmpwalk($sw, OID_ENTPHYSICALMODELNAME);
+		if (is_array($models)) {
+			foreach ($models as $val) {
+				$val = trim($val);
+				if (!empty($val)) {
+					$result['model'] = $val;
+					break;
+				}
+			}
+		}
+	}
+
+	if ($version_source === 'entity_software') {
+		$versions = switchmgmt_snmpwalk($sw, OID_ENTPHYSICALSOFTWAREREV);
+		if (is_array($versions)) {
+			foreach ($versions as $val) {
+				$val = trim($val);
+				if (!empty($val)) {
+					$result['version'] = $val;
+					break;
+				}
+			}
+		}
+	} elseif ($version_source === 'entity_firmware') {
+		$versions = switchmgmt_snmpwalk($sw, OID_ENTPHYSICALFIRMWAREREV);
+		if (is_array($versions)) {
+			foreach ($versions as $val) {
+				$val = trim($val);
+				if (!empty($val)) {
+					$result['version'] = $val;
+					break;
+				}
+			}
+		}
+	}
+
+	return $result;
+}
+
 /* ============================================================
  * Config helpers
  * ============================================================ */
@@ -344,6 +418,8 @@ function switchmgmt_db_open() {
 			ipaddr TEXT UNIQUE NOT NULL,
 			sysname TEXT,
 			sysdescr TEXT,
+			model TEXT,
+			version TEXT,
 			sysuptime TEXT,
 			sysobjectid TEXT,
 			last_polled INTEGER,
@@ -384,11 +460,13 @@ function switchmgmt_db_open() {
  */
 function switchmgmt_db_update_switch($db, $ipaddr, $sysinfo) {
 	$stmt = $db->prepare("
-		INSERT INTO switches (ipaddr, sysname, sysdescr, sysuptime, sysobjectid, last_polled, poll_status)
-		VALUES (:ip, :name, :descr, :uptime, :oid, :time, 'ok')
+		INSERT INTO switches (ipaddr, sysname, sysdescr, model, version, sysuptime, sysobjectid, last_polled, poll_status)
+		VALUES (:ip, :name, :descr, :model, :version, :uptime, :oid, :time, 'ok')
 		ON CONFLICT(ipaddr) DO UPDATE SET
 			sysname = :name,
 			sysdescr = :descr,
+			model = :model,
+			version = :version,
 			sysuptime = :uptime,
 			sysobjectid = :oid,
 			last_polled = :time,
@@ -397,6 +475,8 @@ function switchmgmt_db_update_switch($db, $ipaddr, $sysinfo) {
 	$stmt->bindValue(':ip', $ipaddr, SQLITE3_TEXT);
 	$stmt->bindValue(':name', $sysinfo['sysname'], SQLITE3_TEXT);
 	$stmt->bindValue(':descr', $sysinfo['sysdescr'], SQLITE3_TEXT);
+	$stmt->bindValue(':model', $sysinfo['model'] ?? '', SQLITE3_TEXT);
+	$stmt->bindValue(':version', $sysinfo['version'] ?? '', SQLITE3_TEXT);
 	$stmt->bindValue(':uptime', $sysinfo['sysuptime'], SQLITE3_TEXT);
 	$stmt->bindValue(':oid', $sysinfo['sysobjectid'], SQLITE3_TEXT);
 	$stmt->bindValue(':time', time(), SQLITE3_INTEGER);
@@ -588,10 +668,16 @@ function switchmgmt_poll_switch($sw) {
 		'sysuptime'   => switchmgmt_snmpget($sw, OID_SYSUPTIME),
 		'sysobjectid' => switchmgmt_snmpget($sw, OID_SYSOBJECTID),
 	);
-	switchmgmt_db_update_switch($db, $ip, $sysinfo);
 
-	// Detect vendor for interface filtering
+	// Detect vendor for interface filtering and model/version resolution
 	$vendor = switchmgmt_detect_vendor($sysinfo);
+
+	// Resolve model and version from ENTITY-MIB (vendor-specific)
+	$mv = switchmgmt_resolve_model_version($sw, $vendor);
+	$sysinfo['model'] = $mv['model'];
+	$sysinfo['version'] = $mv['version'];
+
+	switchmgmt_db_update_switch($db, $ip, $sysinfo);
 
 	// Walk interface table
 	$ifdescrs = switchmgmt_walk_indexed($sw, OID_IFDESCR);
@@ -914,6 +1000,27 @@ function sync_package_switchmgmt() {
 
 	write_config("Switch Management: settings updated");
 	configure_cron();
+
+	// Poll any switches that haven't been polled yet (newly added)
+	if (isset($settings['enable']) && $settings['enable'] == 'on') {
+		$db = switchmgmt_db_open();
+		if ($db) {
+			foreach ($switches as $sw) {
+				if (empty($sw['ipaddr'])) {
+					continue;
+				}
+				$stmt = $db->prepare("SELECT last_polled FROM switches WHERE ipaddr = :ip");
+				$stmt->bindValue(':ip', $sw['ipaddr'], SQLITE3_TEXT);
+				$res = $stmt->execute();
+				$row = $res->fetchArray(SQLITE3_ASSOC);
+				if (!$row) {
+					switchmgmt_log("New switch {$sw['ipaddr']} - polling immediately");
+					switchmgmt_poll_switch($sw);
+				}
+			}
+			$db->close();
+		}
+	}
 }
 
 function switchmgmt_install() {

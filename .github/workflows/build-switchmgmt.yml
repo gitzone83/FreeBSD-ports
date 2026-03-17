@@ -39,6 +39,7 @@ jobs:
         with:
           release: "14.1"
           usesh: true
+          envs: 'PKG_VERSION'
           run: |
             set -e
 

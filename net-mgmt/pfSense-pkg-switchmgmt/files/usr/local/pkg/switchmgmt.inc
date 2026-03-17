@@ -893,6 +893,18 @@ function switchmgmt_format_speed($speed_bps, $highspeed_mbps = 0) {
 	return '-';
 }
 
+function switchmgmt_format_port_name($ifdescr) {
+	// "Ethernet Port on unit 1, port 2" -> "1/2"
+	if (preg_match('/unit\s+(\d+),\s*port\s+(\d+)/i', $ifdescr, $m)) {
+		return $m[1] . '/' . $m[2];
+	}
+	// "GigabitEthernet0/1", "Ethernet 1/1" -> "0/1", "1/1"
+	if (preg_match('/(\d+(?:\/\d+)+)/', $ifdescr, $m)) {
+		return $m[1];
+	}
+	return $ifdescr;
+}
+
 function switchmgmt_format_bytes($bytes) {
 	$bytes = (float)$bytes;
 	if ($bytes >= 1099511627776) {

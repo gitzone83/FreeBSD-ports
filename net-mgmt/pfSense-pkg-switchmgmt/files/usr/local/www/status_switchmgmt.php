@@ -157,19 +157,27 @@ $switch_list = switchmgmt_get_switch_status();
 			<table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
 				<thead>
 					<tr>
-						<th><?=gettext("Port")?></th>
+						<th rowspan="2"><?=gettext("Port")?></th>
+						<th colspan="2" style="text-align:center"><?=gettext("Port Speed")?></th>
+						<th colspan="2" style="text-align:center"><?=gettext("Port Status")?></th>
+						<th colspan="2" style="text-align:center"><?=gettext("Octets")?></th>
+						<th colspan="2" style="text-align:center"><?=gettext("Packets")?></th>
+						<th colspan="2" style="text-align:center"><?=gettext("Errors")?></th>
+						<th colspan="2" style="text-align:center"><?=gettext("Discards")?></th>
+					</tr>
+					<tr>
 						<th><?=gettext("Capability")?></th>
-						<th><?=gettext("Speed")?></th>
+						<th><?=gettext("Current")?></th>
 						<th><?=gettext("Admin")?></th>
 						<th><?=gettext("Oper")?></th>
-						<th><?=gettext("In Octets")?></th>
-						<th><?=gettext("Out Octets")?></th>
-						<th><?=gettext("In Pkts")?></th>
-						<th><?=gettext("Out Pkts")?></th>
-						<th><?=gettext("In Err")?></th>
-						<th><?=gettext("Out Err")?></th>
-						<th><?=gettext("In Disc")?></th>
-						<th><?=gettext("Out Disc")?></th>
+						<th><?=gettext("In")?></th>
+						<th><?=gettext("Out")?></th>
+						<th><?=gettext("In")?></th>
+						<th><?=gettext("Out")?></th>
+						<th><?=gettext("In")?></th>
+						<th><?=gettext("Out")?></th>
+						<th><?=gettext("In")?></th>
+						<th><?=gettext("Out")?></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -185,7 +193,7 @@ $switch_list = switchmgmt_get_switch_status();
 	$admin_class = ($admin == 'up') ? 'success' : (($admin == 'down') ? 'warning' : 'default');
 ?>
 					<tr>
-						<td><?=htmlspecialchars($port['ifdescr'] ?: '-')?></td>
+						<td><?=htmlspecialchars(switchmgmt_format_port_name($port['ifdescr'] ?: '-'))?></td>
 						<td><?=switchmgmt_format_speed($port['ifspeed'], $port['ifmaxspeed'] ?? $port['ifhighspeed'])?></td>
 						<td><?=($oper == 'up') ? switchmgmt_format_speed($port['ifspeed'], $port['ifhighspeed']) : '-'?></td>
 						<td><span class="label label-<?=$admin_class?>"><?=$admin?></span></td>

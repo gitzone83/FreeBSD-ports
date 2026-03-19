@@ -156,6 +156,7 @@ define('OID_DOT1QPVID',   '.1.3.6.1.2.1.17.7.1.4.5.1.1');
 define('OID_CISCO_VMVLAN', '.1.3.6.1.4.1.9.9.68.1.2.2.1.2');
 
 // ENTITY-MIB (entPhysicalTable)
+define('OID_ENTPHYSICALDESCR',       '.1.3.6.1.2.1.47.1.1.1.1.2');
 define('OID_ENTPHYSICALMODELNAME',   '.1.3.6.1.2.1.47.1.1.1.1.13');
 define('OID_ENTPHYSICALSOFTWAREREV', '.1.3.6.1.2.1.47.1.1.1.1.10');
 define('OID_ENTPHYSICALFIRMWAREREV', '.1.3.6.1.2.1.47.1.1.1.1.9');
@@ -269,6 +270,33 @@ function switchmgmt_get_vendor_filters() {
 			'model_source' => 'entity_mib',
 			'version_source' => 'entity_firmware',
 		),
+		'juniper' => array(
+			'name' => 'Juniper',
+			'match' => function($sysinfo) {
+				$oid = $sysinfo['sysobjectid'] ?? '';
+				$descr = $sysinfo['sysdescr'] ?? '';
+				return (strpos($oid, '.1.3.6.1.4.1.2636') === 0)
+					|| (stripos($descr, 'juniper') !== false)
+					|| (stripos($descr, 'junos') !== false);
+			},
+			'exclude_types' => array(
+				0,   // unknown/unset
+				1,   // other (dsc, vme, cbp0, esi, fti0, irb, jsrv, pip0, vtep, pfh-*, pfe-*)
+				24,  // softwareLoopback (lo0)
+				53,  // propVirtual (.0 sub-interfaces, .32768, .16383, etc.)
+				131, // tunnel (gre, ipip, pime, pimd, mtun, gr-*)
+				150, // mplsTunnel (lsi)
+			),
+			// Internal interfaces that are ethernetCsmacd(6) but not front-panel ports
+			'exclude_name_patterns' => array(
+				'/^em\d/',     // internal management Ethernet (em0, em2, em3)
+				'/^bme\d/',    // internal backplane management (bme0)
+				'/^sxe-/',     // internal fabric/switching engine
+				'/^lsi$/',     // MPLS label-switched interface
+			),
+			'model_source' => 'entity_descr',
+			'version_source' => 'entity_software',
+		),
 		'cisco' => array(
 			'name' => 'Cisco',
 			'match' => function($sysinfo) {
@@ -311,8 +339,18 @@ function switchmgmt_detect_vendor($sysinfo) {
 	return $filters['default'];
 }
 
-function switchmgmt_should_exclude_interface($iftype, $vendor) {
-	return in_array((int)$iftype, $vendor['exclude_types'], true);
+function switchmgmt_should_exclude_interface($iftype, $vendor, $ifdescr = '') {
+	if (in_array((int)$iftype, $vendor['exclude_types'], true)) {
+		return true;
+	}
+	if (!empty($ifdescr) && !empty($vendor['exclude_name_patterns'])) {
+		foreach ($vendor['exclude_name_patterns'] as $pattern) {
+			if (preg_match($pattern, $ifdescr)) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 /**
@@ -351,7 +389,18 @@ function switchmgmt_resolve_model_version($sw, $vendor) {
 	$model_source = $vendor['model_source'] ?? '';
 	$version_source = $vendor['version_source'] ?? '';
 
-	if ($model_source === 'entity_mib') {
+	if ($model_source === 'entity_descr') {
+		$descrs = switchmgmt_snmpwalk($sw, OID_ENTPHYSICALDESCR);
+		if (is_array($descrs)) {
+			foreach ($descrs as $val) {
+				$val = trim($val);
+				if (!empty($val)) {
+					$result['model'] = $val;
+					break;
+				}
+			}
+		}
+	} elseif ($model_source === 'entity_mib') {
 		$models = switchmgmt_snmpwalk($sw, OID_ENTPHYSICALMODELNAME);
 		if (is_array($models)) {
 			foreach ($models as $val) {
@@ -1467,7 +1516,8 @@ function switchmgmt_poll_switch($sw) {
 
 		// Filter out non-physical interfaces based on vendor rules
 		$normalized_type = $iftypes[$idx] ?? 0;
-		if (switchmgmt_should_exclude_interface($normalized_type, $vendor)) {
+		$descr = $ifdescrs[$idx] ?? '';
+		if (switchmgmt_should_exclude_interface($normalized_type, $vendor, $descr)) {
 			$excluded_indices[] = (int)$idx;
 			continue;
 		}
@@ -1583,7 +1633,37 @@ function switchmgmt_get_port_status($switch_ip) {
 		$results[] = $row;
 	}
 	$db->close();
+
+	// Natural sort by interface name for readable port ordering
+	// Groups: ge- < xe- < et- < ae (physical first, then LAGs)
+	usort($results, function($a, $b) {
+		return strnatcmp(
+			switchmgmt_port_sort_key($a['ifdescr'] ?? ''),
+			switchmgmt_port_sort_key($b['ifdescr'] ?? '')
+		);
+	});
+
 	return $results;
+}
+
+/**
+ * Generate a sort key for natural interface ordering.
+ * Orders: ge- (1), xe- (2), et- (3), other physical (4), ae (5)
+ * Within each group, sorts by slot/port number naturally.
+ */
+function switchmgmt_port_sort_key($ifdescr) {
+	$prefixes = array(
+		'ge-'  => '1',
+		'xe-'  => '2',
+		'et-'  => '3',
+		'ae'   => '5',
+	);
+	foreach ($prefixes as $prefix => $order) {
+		if (strpos($ifdescr, $prefix) === 0) {
+			return $order . '-' . $ifdescr;
+		}
+	}
+	return '4-' . $ifdescr;
 }
 
 /* ============================================================
